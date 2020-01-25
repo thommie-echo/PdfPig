@@ -7,19 +7,12 @@
     using Tokens;
     using Util;
 
-    internal class CrossReferenceStreamParser
+    internal static class CrossReferenceStreamParser
     {
-        private readonly IFilterProvider filterProvider;
-
-        public CrossReferenceStreamParser(IFilterProvider filterProvider)
-        {
-            this.filterProvider = filterProvider;
-        }
-
         /// <summary>
         /// Parses through the unfiltered stream and populates the xrefTable HashMap.
         /// </summary>
-        public CrossReferenceTablePart Parse(long streamOffset, StreamToken stream)
+        public static CrossReferenceTablePart Parse(long streamOffset, StreamToken stream, IFilterProvider filterProvider)
         {
             var decoded = stream.Decode(filterProvider);
 

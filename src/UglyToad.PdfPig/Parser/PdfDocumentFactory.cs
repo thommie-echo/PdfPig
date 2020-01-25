@@ -16,7 +16,6 @@
     using Logging;
     using Outline;
     using Parts;
-    using Parts.CrossReference;
     using PdfFonts;
     using PdfFonts.Parser;
     using PdfFonts.Parser.Handlers;
@@ -93,8 +92,7 @@
             var locationProvider = new ObjectLocationProvider(() => crossReferenceTable, bruteForceSearcher);
             var pdfScanner = new PdfTokenScanner(inputBytes, locationProvider, filterProvider, NoOpEncryptionHandler.Instance);
 
-            var crossReferenceStreamParser = new CrossReferenceStreamParser(filterProvider);
-            var crossReferenceParser = new CrossReferenceParser(log, xrefValidator, objectChecker, crossReferenceStreamParser, new CrossReferenceTableParser());
+            var crossReferenceParser = new CrossReferenceParser(log, xrefValidator, objectChecker);
             
             var version = FileHeaderParser.Parse(scanner, isLenientParsing, log);
             
@@ -105,7 +103,7 @@
 
             crossReferenceOffset = validator.Validate(crossReferenceOffset, scanner, inputBytes, isLenientParsing);
             
-            crossReferenceTable = crossReferenceParser.Parse(inputBytes, isLenientParsing, crossReferenceOffset, pdfScanner, scanner);
+            crossReferenceTable = crossReferenceParser.Parse(inputBytes, isLenientParsing, crossReferenceOffset, pdfScanner, scanner, filterProvider);
             
             var fontDescriptorFactory = new FontDescriptorFactory();
             

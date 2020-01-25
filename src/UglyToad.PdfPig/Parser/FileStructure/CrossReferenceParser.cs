@@ -4,7 +4,7 @@
     using System.Collections.Generic;
     using Core;
     using CrossReference;
-    using Exceptions;
+    using Filters;
     using Logging;
     using Parts.CrossReference;
     using Tokenization.Scanner;
@@ -14,23 +14,20 @@
     {
         private readonly ILog log;
         private readonly XrefOffsetValidator offsetValidator;
-        private readonly CrossReferenceStreamParser crossReferenceStreamParser;
-        private readonly CrossReferenceTableParser crossReferenceTableParser;
         private readonly XrefCosOffsetChecker xrefCosChecker;
 
         public CrossReferenceParser(ILog log, XrefOffsetValidator offsetValidator,
-            XrefCosOffsetChecker xrefCosChecker,
-            CrossReferenceStreamParser crossReferenceStreamParser,
-            CrossReferenceTableParser crossReferenceTableParser)
+            XrefCosOffsetChecker xrefCosChecker)
         {
             this.log = log;
             this.offsetValidator = offsetValidator;
-            this.crossReferenceStreamParser = crossReferenceStreamParser;
-            this.crossReferenceTableParser = crossReferenceTableParser;
             this.xrefCosChecker = xrefCosChecker;
         }
         
-        public CrossReferenceTable Parse(IInputBytes bytes, bool isLenientParsing, long crossReferenceLocation, IPdfTokenScanner pdfScanner, ISeekableTokenScanner tokenScanner)
+        public CrossReferenceTable Parse(IInputBytes bytes, bool isLenientParsing, long crossReferenceLocation, 
+            IPdfTokenScanner pdfScanner, 
+            ISeekableTokenScanner tokenScanner,
+            IFilterProvider filterProvider)
         {
             long fixedOffset = offsetValidator.CheckXRefOffset(crossReferenceLocation, tokenScanner, bytes, isLenientParsing);
             if (fixedOffset > -1)
@@ -67,7 +64,7 @@
                     missedAttempts = 0;
                     log.Debug("Element was cross reference table.");
 
-                    CrossReferenceTablePart tablePart = crossReferenceTableParser.Parse(tokenScanner,
+                    CrossReferenceTablePart tablePart = CrossReferenceTableParser.Parse(tokenScanner,
                         previousCrossReferenceLocation, isLenientParsing);
 
                     previousCrossReferenceLocation = tablePart.GetPreviousOffset();
@@ -102,7 +99,7 @@
                         {
                             try
                             {
-                                streamPart = ParseCrossReferenceStream(streamOffset, pdfScanner);
+                                streamPart = ParseCrossReferenceStream(streamOffset, pdfScanner, filterProvider);
                             }
                             catch (InvalidOperationException ex)
                             {
@@ -146,7 +143,7 @@
                     tokenScanner.Seek(previousCrossReferenceLocation);
 
                     // parse xref stream
-                    var tablePart = ParseCrossReferenceStream(previousCrossReferenceLocation, pdfScanner);
+                    var tablePart = ParseCrossReferenceStream(previousCrossReferenceLocation, pdfScanner, filterProvider);
                     table.Add(tablePart);
 
                     previousCrossReferenceLocation = tablePart.Previous;
@@ -195,7 +192,8 @@
             return resolved;
         }
 
-        private CrossReferenceTablePart ParseCrossReferenceStream(long objByteOffset, IPdfTokenScanner pdfScanner)
+        private CrossReferenceTablePart ParseCrossReferenceStream(long objByteOffset, IPdfTokenScanner pdfScanner,
+            IFilterProvider filterProvider)
         {
             pdfScanner.Seek(objByteOffset);
 
@@ -208,7 +206,7 @@
                 throw new PdfDocumentFormatException($"When reading a cross reference stream object found a non-stream object: {streamObjectToken?.Data}");
             }
             
-            CrossReferenceTablePart xrefTablePart = crossReferenceStreamParser.Parse(objByteOffset, objectStream);
+            CrossReferenceTablePart xrefTablePart = CrossReferenceStreamParser.Parse(objByteOffset, objectStream, filterProvider);
 
             return xrefTablePart;
         }
