@@ -40,18 +40,17 @@
          * - Force close filled shapes
          */
 
+
         /// <summary>
         /// GetTables
         /// </summary>
         /// <param name="page"></param>
+        /// <param name="words"></param>
         /// <param name="minCellsInTable"></param>
         /// <returns></returns>
-        public static IEnumerable<TableBlock> GetTables(Page page, int minCellsInTable = 4)
+        public static IEnumerable<TableBlock> GetTables(Page page, IEnumerable<Word> words, int minCellsInTable = 4)
         {
             var candidates = GetCandidates(page, minCellsInTable).ToList();
-            var letters = page.Letters;
-            var words = NearestNeighbourWordExtractor.Instance.GetWords(letters);
-
             foreach (var candidate in candidates)
             {
                 List<TableCell> cells = candidate.Select(c => new TableCell(c.Item2, null, c.Item1))
@@ -66,10 +65,10 @@
 
                     for (var c = 0; c < cells.Count; c++)
                     {
-                        if(b == c) continue;
+                        if (b == c) continue;
                         var current2 = cells[c];
 
-                        if(Math.Abs(centroid.Y - current2.BoundingBox.Centroid.Y) < 1e-5 && shouldMerge[c] != b)
+                        if (Math.Abs(centroid.Y - current2.BoundingBox.Centroid.Y) < 1e-5 && shouldMerge[c] != b)
                         {
                             shouldMerge[b] = c;
                             break;
@@ -96,10 +95,10 @@
 
                     for (var c = 0; c < cells.Count; c++)
                     {
-                        if(b == c) continue;
+                        if (b == c) continue;
                         var current2 = cells[c];
 
-                        if(Math.Abs(centroid.X - current2.BoundingBox.Centroid.X) < 1e-5 && shouldMerge[c] != b)
+                        if (Math.Abs(centroid.X - current2.BoundingBox.Centroid.X) < 1e-5 && shouldMerge[c] != b)
                         {
                             shouldMerge[b] = c;
                             break;
@@ -124,11 +123,11 @@
                     var currentCell = cells[i];
                     for (int j = 0; j < cells.Count; j++)
                     {
-                        if(i == j) continue;
+                        if (i == j) continue;
                         var otherCell = cells[j];
-                        if(currentCell.RowSpan.Equals(otherCell.RowSpan)) continue;
+                        if (currentCell.RowSpan.Equals(otherCell.RowSpan)) continue;
 
-                        if(currentCell.BoundingBox.Top >= otherCell.BoundingBox.Centroid.Y &&
+                        if (currentCell.BoundingBox.Top >= otherCell.BoundingBox.Centroid.Y &&
                             currentCell.BoundingBox.Bottom <= otherCell.BoundingBox.Centroid.Y &&
                             currentCell.BoundingBox.Height > otherCell.BoundingBox.Height)
                         {
@@ -144,11 +143,11 @@
                     var currentCell = cells[i];
                     for (int j = 0; j < cells.Count; j++)
                     {
-                        if(i == j) continue;
+                        if (i == j) continue;
                         var otherCell = cells[j];
-                        if(currentCell.ColumnSpan.Equals(otherCell.ColumnSpan)) continue;
+                        if (currentCell.ColumnSpan.Equals(otherCell.ColumnSpan)) continue;
 
-                        if(currentCell.BoundingBox.Right >= otherCell.BoundingBox.Centroid.X &&
+                        if (currentCell.BoundingBox.Right >= otherCell.BoundingBox.Centroid.X &&
                             currentCell.BoundingBox.Left <= otherCell.BoundingBox.Centroid.X &&
                             currentCell.BoundingBox.Width > otherCell.BoundingBox.Width)
                         {
@@ -161,7 +160,7 @@
                 foreach (var cell in cells)
                 {
                     var containedWords = words.Where(w => cell.BoundingBox.Contains(w.BoundingBox));
-                    if(containedWords.Any())
+                    if (containedWords.Any())
                     {
                         cell.SetContent(new TextBlock(containedWords.Select(w => new TextLine(new[] { w })).ToList()));
                     }
@@ -169,6 +168,21 @@
 
                 yield return new TableBlock(cells);
             }
+        }
+
+        /// <summary>
+        /// GetTables
+        /// </summary>
+        /// <param name="page"></param>
+        /// <param name="minCellsInTable"></param>
+        /// <returns></returns>
+        public static IEnumerable<TableBlock> GetTables(Page page, int minCellsInTable = 4)
+        {
+            
+            var letters = page.Letters;
+            var words = NearestNeighbourWordExtractor.Instance.GetWords(letters);
+
+            return GetTables(page, words, minCellsInTable);
         }
 
         /// <summary>
