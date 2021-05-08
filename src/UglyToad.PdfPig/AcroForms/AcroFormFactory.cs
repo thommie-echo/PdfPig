@@ -6,7 +6,6 @@
     using Content;
     using Core;
     using CrossReference;
-    using Exceptions;
     using Fields;
     using Filters;
     using Parser.Parts;
@@ -30,10 +29,10 @@
         };
 
         private readonly IPdfTokenScanner tokenScanner;
-        private readonly IFilterProvider filterProvider;
+        private readonly ILookupFilterProvider filterProvider;
         private readonly CrossReferenceTable crossReferenceTable;
 
-        public AcroFormFactory(IPdfTokenScanner tokenScanner, IFilterProvider filterProvider, CrossReferenceTable crossReferenceTable)
+        public AcroFormFactory(IPdfTokenScanner tokenScanner, ILookupFilterProvider filterProvider, CrossReferenceTable crossReferenceTable)
         {
             this.tokenScanner = tokenScanner ?? throw new ArgumentNullException(nameof(tokenScanner));
             this.filterProvider = filterProvider ?? throw new ArgumentNullException(nameof(filterProvider));
@@ -314,7 +313,7 @@
                 }
                 else if (DirectObjectFinder.TryGet(textValueToken, tokenScanner, out StreamToken valueStreamToken))
                 {
-                    textValue = OtherEncodings.BytesAsLatin1String(valueStreamToken.Decode(filterProvider).ToArray());
+                    textValue = OtherEncodings.BytesAsLatin1String(valueStreamToken.Decode(filterProvider, tokenScanner).ToArray());
                 }
             }
 
@@ -478,6 +477,17 @@
             var isChecked = false;
             if (!fieldDictionary.TryGetOptionalTokenDirect(NameToken.V, tokenScanner, out NameToken valueToken))
             {
+                if (fieldDictionary.TryGetOptionalTokenDirect(NameToken.As, tokenScanner, out NameToken appearanceStateName)
+                    && fieldDictionary.TryGetOptionalTokenDirect(NameToken.Ap, tokenScanner, out DictionaryToken _))
+                {
+                    // Issue #267 - Use the set appearance instead, this might not work for 3 state checkboxes.
+                    isChecked = !string.Equals(
+                        appearanceStateName.Data,
+                        NameToken.Off,
+                        StringComparison.OrdinalIgnoreCase);
+                    valueToken = appearanceStateName;
+                    return (isChecked, valueToken);
+                }
                 valueToken = NameToken.Off;
             }
             else if (inheritsValue && fieldDictionary.TryGet(NameToken.As, tokenScanner, out NameToken appearanceStateName))

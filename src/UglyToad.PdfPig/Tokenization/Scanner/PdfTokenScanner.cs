@@ -22,12 +22,15 @@
 
         private readonly IInputBytes inputBytes;
         private readonly IObjectLocationProvider objectLocationProvider;
-        private readonly IFilterProvider filterProvider;
+        private readonly ILookupFilterProvider filterProvider;
         private readonly CoreTokenScanner coreTokenScanner;
 
         private IEncryptionHandler encryptionHandler;
         private bool isDisposed;
         private bool isBruteForcing;
+
+        private readonly Dictionary<IndirectReference, ObjectToken> overwrittenTokens =
+            new Dictionary<IndirectReference, ObjectToken>();
 
         /// <summary>
         /// Stores tokens encountered between obj - endobj markers for each <see cref="MoveNext"/> call.
@@ -47,7 +50,7 @@
 
         public long Length => coreTokenScanner.Length;
 
-        public PdfTokenScanner(IInputBytes inputBytes, IObjectLocationProvider objectLocationProvider, IFilterProvider filterProvider,
+        public PdfTokenScanner(IInputBytes inputBytes, IObjectLocationProvider objectLocationProvider, ILookupFilterProvider filterProvider,
             IEncryptionHandler encryptionHandler)
         {
             this.inputBytes = inputBytes;
@@ -670,6 +673,11 @@
                 throw new ObjectDisposedException(nameof(PdfTokenScanner));
             }
 
+            if (overwrittenTokens.TryGetValue(reference, out var value))
+            {
+                return value;
+            }
+
             if (objectLocationProvider.TryGetCached(reference, out var objectToken))
             {
                 return objectToken;
@@ -688,6 +696,11 @@
                 return result;
             }
 
+            if (offset == 0 && reference.Generation > ushort.MaxValue)
+            {
+                return new ObjectToken(offset, reference, NullToken.Instance);
+            }
+
             Seek(offset);
 
             if (!MoveNext())
@@ -703,6 +716,13 @@
             }
 
             return BruteForceFileToFindReference(reference);
+        }
+
+        public void ReplaceToken(IndirectReference reference, IToken token)
+        {
+            // Using 0 position as it isn't written to stream and this value doesn't
+            // seem to be used by any callers. In future may need to revisit this.
+            overwrittenTokens[reference] = new ObjectToken(0, reference, token);
         }
 
         private ObjectToken BruteForceFileToFindReference(IndirectReference reference)
@@ -774,7 +794,7 @@
             }
 
             // Read the N integers
-            var bytes = new ByteArrayInputBytes(stream.Decode(filterProvider));
+            var bytes = new ByteArrayInputBytes(stream.Decode(filterProvider, this));
 
             var scanner = new CoreTokenScanner(bytes);
 

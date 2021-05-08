@@ -16,10 +16,10 @@
     internal class Type0FontHandler : IFontHandler
     {
         private readonly CidFontFactory cidFontFactory;
-        private readonly IFilterProvider filterProvider;
+        private readonly ILookupFilterProvider filterProvider;
         private readonly IPdfTokenScanner scanner;
 
-        public Type0FontHandler(CidFontFactory cidFontFactory, IFilterProvider filterProvider,
+        public Type0FontHandler(CidFontFactory cidFontFactory, ILookupFilterProvider filterProvider,
             IPdfTokenScanner scanner)
         {
             this.cidFontFactory = cidFontFactory;
@@ -66,16 +66,16 @@
 
                 if (DirectObjectFinder.TryGet<StreamToken>(toUnicodeValue, scanner, out var toUnicodeStream))
                 {
-                    var decodedUnicodeCMap = toUnicodeStream?.Decode(filterProvider);
+                    var decodedUnicodeCMap = toUnicodeStream?.Decode(filterProvider, scanner);
 
                     if (decodedUnicodeCMap != null)
                     {
                         toUnicodeCMap = CMapCache.Parse(new ByteArrayInputBytes(decodedUnicodeCMap));
                     }
                 }
-                else if (DirectObjectFinder.TryGet<NameToken>(toUnicodeValue, scanner, out var toUnicodeName))
+                else if (DirectObjectFinder.TryGet<NameToken>(toUnicodeValue, scanner, out var toUnicodeName)
+                && CMapCache.TryGet(toUnicodeName.Data, out toUnicodeCMap))
                 {
-                    toUnicodeCMap = CMapCache.Get(toUnicodeName.Data);
                 }
                 else
                 {
@@ -144,15 +144,18 @@
 
             if (dictionary.TryGet(NameToken.Encoding, scanner, out NameToken encodingName))
             {
-                var cmap = CMapCache.Get(encodingName.Data);
-
+                if (!CMapCache.TryGet(encodingName.Data, out var cmap))
+                {
+                    throw new InvalidOperationException($"Missing CMap named {encodingName.Data}.");
+                }
+                
                 result = cmap ?? throw new InvalidOperationException($"Missing CMap named {encodingName.Data}.");
 
                 isCMapPredefined = true;
             }
             else if (dictionary.TryGet(NameToken.Encoding, scanner, out StreamToken stream))
             {
-                var decoded = stream.Decode(filterProvider);
+                var decoded = stream.Decode(filterProvider, scanner);
 
                 var cmap = CMapCache.Parse(new ByteArrayInputBytes(decoded));
 
@@ -210,16 +213,28 @@
             }
 
             var fullCmapName = cidFont.SystemInfo.ToString();
-            var nonUnicodeCMap = CMapCache.Get(fullCmapName);
 
-            if (nonUnicodeCMap == null)
+            string registry;
+            string ordering;
+            if (CMapCache.TryGet(fullCmapName, out var nonUnicodeCMap))
             {
-                return (null, true);
+                registry = nonUnicodeCMap.Info.Registry;
+                ordering = nonUnicodeCMap.Info.Ordering;
+            }
+            else
+            {
+                registry = cidFont.SystemInfo.Registry;
+                ordering = cidFont.SystemInfo.Ordering;
+            }
+            
+            var unicodeCMapName = $"{registry}-{ordering}-UCS2";
+
+            if (!CMapCache.TryGet(unicodeCMapName, out var unicodeCMap))
+            {
+                throw new InvalidFontFormatException($"Could not locate CMap by name: {nonUnicodeCMap}.");
             }
 
-            var unicodeCMapName = $"{nonUnicodeCMap.Info.Registry}-{nonUnicodeCMap.Info.Ordering}-UCS2";
-
-            return (CMapCache.Get(unicodeCMapName), true);
+            return (unicodeCMap, true);
         }
     }
 }

@@ -1,6 +1,4 @@
-﻿using UglyToad.PdfPig.Parser.Parts;
-
-namespace UglyToad.PdfPig.XObjects
+﻿namespace UglyToad.PdfPig.XObjects
 {
     using System;
     using System.Collections.Generic;
@@ -13,11 +11,12 @@ namespace UglyToad.PdfPig.XObjects
     using Graphics.Core;
     using Tokenization.Scanner;
     using Tokens;
+    using Util;
 
     internal static class XObjectFactory
     {
         public static XObjectImage ReadImage(XObjectContentRecord xObject, IPdfTokenScanner pdfScanner,
-            IFilterProvider filterProvider,
+            ILookupFilterProvider filterProvider,
             IResourceStore resourceStore)
         {
             if (xObject == null)
@@ -89,7 +88,7 @@ namespace UglyToad.PdfPig.XObjects
             var supportsFilters = filterDictionary != null;
             if (filterDictionary != null)
             {
-                var filters = filterProvider.GetFilters(filterDictionary);
+                var filters = filterProvider.GetFilters(filterDictionary, pdfScanner);
                 foreach (var filter in filters)
                 {
                     if (!filter.IsSupported)
@@ -100,7 +99,7 @@ namespace UglyToad.PdfPig.XObjects
                 }
             }
 
-            var decodedBytes = supportsFilters ? new Lazy<IReadOnlyList<byte>>(() => xObject.Stream.Decode(filterProvider))
+            var decodedBytes = supportsFilters ? new Lazy<IReadOnlyList<byte>>(() => xObject.Stream.Decode(filterProvider, pdfScanner))
                 : null;
 
             var decode = EmptyArray<decimal>.Instance;
@@ -137,9 +136,26 @@ namespace UglyToad.PdfPig.XObjects
                 }
             }
 
-            return new XObjectImage(bounds, width, height, bitsPerComponent, colorSpace, isJpxDecode, isImageMask, intent, interpolate, decode,
-                dictionary, xObject.Stream.Data, decodedBytes);
+            var details = ColorSpaceDetailsParser.GetColorSpaceDetails(colorSpace, dictionary, pdfScanner, resourceStore, filterProvider);
+
+            return new XObjectImage(
+                bounds,
+                width,
+                height,
+                bitsPerComponent,
+                colorSpace,
+                isJpxDecode,
+                isImageMask,
+                intent,
+                interpolate,
+                decode,
+                dictionary,
+                xObject.Stream.Data,
+                decodedBytes,
+                details);
         }
+
+        
 
         private static bool TryMapColorSpace(NameToken name, IResourceStore resourceStore, out ColorSpace colorSpaceResult)
         {
