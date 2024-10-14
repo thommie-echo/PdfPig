@@ -2,6 +2,7 @@
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics.CodeAnalysis;
     using CidFonts;
     using Core;
     using Filters;
@@ -13,21 +14,24 @@
     using PdfPig.Parser.Parts;
     using Tokenization.Scanner;
     using Tokens;
+    using UglyToad.PdfPig.Logging;
     using Util;
 
     internal class CidFontFactory
     {
         private readonly ILookupFilterProvider filterProvider;
         private readonly IPdfTokenScanner pdfScanner;
+        private readonly ILog logger;
 
-        public CidFontFactory(IPdfTokenScanner pdfScanner, ILookupFilterProvider filterProvider)
+        public CidFontFactory(ILog log, IPdfTokenScanner pdfScanner, ILookupFilterProvider filterProvider)
         {
+            this.logger = log;
             this.pdfScanner = pdfScanner;
             this.filterProvider = filterProvider;
         }
 
-        public ICidFont Generate(DictionaryToken dictionary)
-        { 
+        public ICidFont? Generate(DictionaryToken dictionary)
+        {
             var type = dictionary.GetNameOrDefault(NameToken.Type);
             if (!NameToken.Font.Equals(type))
             {
@@ -37,20 +41,28 @@
             var widths = ReadWidths(dictionary);
 
             var defaultWidth = default(double?);
-            if (dictionary.TryGet(NameToken.Dw, pdfScanner, out NumericToken defaultWidthToken))
+            if (dictionary.TryGet(NameToken.Dw, pdfScanner, out NumericToken? defaultWidthToken))
             {
                 defaultWidth = defaultWidthToken.Double;
             }
 
             var verticalWritingMetrics = ReadVerticalDisplacements(dictionary);
 
-            FontDescriptor descriptor = null;
+            FontDescriptor? descriptor = null;
             if (TryGetFontDescriptor(dictionary, out var descriptorDictionary))
             {
                 descriptor = FontDescriptorFactory.Generate(descriptorDictionary, pdfScanner);
             }
 
-            var fontProgram = ReadDescriptorFile(descriptor);
+            ICidFontProgram? fontProgram = null;
+            try
+            {
+                fontProgram = ReadDescriptorFile(descriptor);
+            }
+            catch (Exception ex)
+            {
+                logger.Error($"Invalid descriptor in CID font named '{descriptor?.FontName}': {ex.Message}.");
+            }
 
             var baseFont = dictionary.GetNameOrDefault(NameToken.BaseFont);
 
@@ -59,52 +71,34 @@
             var subType = dictionary.GetNameOrDefault(NameToken.Subtype);
             if (NameToken.CidFontType0.Equals(subType))
             {
-                return new Type0CidFont(fontProgram, type, subType, baseFont, systemInfo, descriptor, verticalWritingMetrics, widths, defaultWidth);
+                return new Type0CidFont(fontProgram!, type!, subType!, baseFont!, systemInfo, descriptor!, verticalWritingMetrics, widths, defaultWidth);
             }
 
             if (NameToken.CidFontType2.Equals(subType))
             {
                 var cidToGid = GetCharacterIdentifierToGlyphIndexMap(dictionary);
 
-                return new Type2CidFont(type, subType, baseFont, systemInfo, descriptor, fontProgram, verticalWritingMetrics, widths, defaultWidth, cidToGid);
+                return new Type2CidFont(type!, subType!, baseFont!, systemInfo, descriptor!, fontProgram, verticalWritingMetrics, widths, defaultWidth, cidToGid);
             }
 
             return null;
         }
 
-        private bool TryGetFontDescriptor(DictionaryToken dictionary, out DictionaryToken descriptorDictionary)
+        private bool TryGetFontDescriptor(DictionaryToken dictionary, [NotNullWhen(true)] out DictionaryToken? descriptorDictionary)
         {
-            descriptorDictionary = null;
-
-            if (!dictionary.TryGet(NameToken.FontDescriptor, out var baseValue))
-            {
-                return false;
-            }
-
-            try
-            {
-                var descriptor = DirectObjectFinder.Get<DictionaryToken>(baseValue, pdfScanner);
-
-                descriptorDictionary = descriptor;
-            }
-            catch
-            {
-                return false;
-            }
-
-            return true;
+            return dictionary.TryGet(NameToken.FontDescriptor, pdfScanner, out descriptorDictionary);
         }
 
-        private ICidFontProgram ReadDescriptorFile(FontDescriptor descriptor)
+        private ICidFontProgram? ReadDescriptorFile(FontDescriptor? descriptor)
         {
-            if (descriptor?.FontFile == null)
+            if (descriptor?.FontFile is null)
             {
                 return null;
             }
 
             var fontFileStream = DirectObjectFinder.Get<StreamToken>(descriptor.FontFile.ObjectKey, pdfScanner);
 
-            if (fontFileStream == null)
+            if (fontFileStream is null)
             {
                 return null;
             }
@@ -114,19 +108,19 @@
             switch (descriptor.FontFile.FileType)
             {
                 case DescriptorFontFile.FontFileType.TrueType:
-                {
-                    var input = new TrueTypeDataBytes(new ByteArrayInputBytes(fontFile));
-                    var ttf = TrueTypeFontParser.Parse(input);
-                    return new PdfCidTrueTypeFont(ttf);
-                }
+                    {
+                        var input = new TrueTypeDataBytes(new MemoryInputBytes(fontFile));
+                        var ttf = TrueTypeFontParser.Parse(input);
+                        return new PdfCidTrueTypeFont(ttf);
+                    }
                 case DescriptorFontFile.FontFileType.FromSubtype:
                     {
-                        if (!DirectObjectFinder.TryGet(descriptor.FontFile.ObjectKey, pdfScanner, out StreamToken str))
+                        if (!DirectObjectFinder.TryGet(descriptor.FontFile.ObjectKey, pdfScanner, out StreamToken? str))
                         {
                             throw new NotSupportedException("Cannot read CID font from subtype.");
                         }
 
-                        if (!str.StreamDictionary.TryGet(NameToken.Subtype, out NameToken subtypeName))
+                        if (!str.StreamDictionary.TryGet(NameToken.Subtype, out NameToken? subtypeName))
                         {
                             throw new PdfDocumentFormatException($"The font file stream did not contain a subtype entry: {str.StreamDictionary}.");
                         }
@@ -142,10 +136,10 @@
                         if (subtypeName == NameToken.OpenType)
                         {
                             var bytes = str.Decode(filterProvider, pdfScanner);
-                            var ttf = TrueTypeFontParser.Parse(new TrueTypeDataBytes(new ByteArrayInputBytes(bytes)));
+                            var ttf = TrueTypeFontParser.Parse(new TrueTypeDataBytes(new MemoryInputBytes(bytes)));
                             return new PdfCidTrueTypeFont(ttf);
                         }
-                        
+
                         throw new PdfDocumentFormatException($"Unexpected subtype for CID font: {subtypeName}.");
                     }
                 default:
@@ -157,7 +151,7 @@
         {
             var widths = new Dictionary<int, double>();
 
-            if (!dict.TryGet(NameToken.W, pdfScanner, out ArrayToken widthArray))
+            if (!dict.TryGet(NameToken.W, pdfScanner, out ArrayToken? widthArray))
             {
                 return widths;
             }
@@ -168,7 +162,7 @@
             {
                 var firstCode = DirectObjectFinder.Get<NumericToken>(widthArray.Data[counter++], pdfScanner);
                 var next = widthArray.Data[counter++];
-                if (DirectObjectFinder.TryGet(next, pdfScanner, out ArrayToken array))
+                if (DirectObjectFinder.TryGet(next, pdfScanner, out ArrayToken? array))
                 {
                     var startRange = firstCode.Int;
                     var arraySize = array.Data.Count;
@@ -267,14 +261,9 @@
                 throw new InvalidFontFormatException($"No CID System Info was found in the CID Font dictionary: {dictionary}");
             }
 
-            if (cidEntry is DictionaryToken cidDictionary)
+            if (!(cidEntry is DictionaryToken cidDictionary))
             {
-
-            }
-            else
-            {
-                cidDictionary =
-                    DirectObjectFinder.Get<DictionaryToken>(cidEntry, pdfScanner);
+                cidDictionary = DirectObjectFinder.Get<DictionaryToken>(cidEntry, pdfScanner);
             }
 
             var registry = SafeKeyAccess(cidDictionary, NameToken.Registry);
@@ -291,19 +280,19 @@
                 return new CharacterIdentifierToGlyphIndexMap();
             }
 
-            if (DirectObjectFinder.TryGet(entry, pdfScanner, out NameToken _))
+            if (DirectObjectFinder.TryGet(entry, pdfScanner, out NameToken? _))
             {
                 return new CharacterIdentifierToGlyphIndexMap();
             }
 
-            if (!DirectObjectFinder.TryGet(entry, pdfScanner, out StreamToken stream))
+            if (!DirectObjectFinder.TryGet(entry, pdfScanner, out StreamToken? stream))
             {
                 throw new PdfDocumentFormatException($"No stream or name token found for /CIDToGIDMap in dictionary: {dictionary}.");
             }
 
             var bytes = stream.Decode(filterProvider, pdfScanner);
 
-            return new CharacterIdentifierToGlyphIndexMap(bytes);
+            return new CharacterIdentifierToGlyphIndexMap(bytes.Span);
         }
 
         private string SafeKeyAccess(DictionaryToken dictionary, NameToken keyName)
@@ -325,12 +314,12 @@
 
             if (token is IndirectReferenceToken obj)
             {
-                if (DirectObjectFinder.TryGet(obj, pdfScanner, out StringToken stringToken))
+                if (DirectObjectFinder.TryGet(obj, pdfScanner, out StringToken? stringToken))
                 {
                     return stringToken.Data;
                 }
 
-                if (DirectObjectFinder.TryGet(obj, pdfScanner, out HexToken hexToken))
+                if (DirectObjectFinder.TryGet(obj, pdfScanner, out HexToken? hexToken))
                 {
                     return hexToken.Data;
                 }

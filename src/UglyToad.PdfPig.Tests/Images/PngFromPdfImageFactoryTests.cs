@@ -1,11 +1,7 @@
 ﻿namespace UglyToad.PdfPig.Tests.Images
 {
-    using System;
-    using System.IO;
-    using System.Linq;
     using UglyToad.PdfPig.Graphics.Colors;
     using UglyToad.PdfPig.Images.Png;
-    using Xunit;
 
     public class PngFromPdfImageFactoryTests
     {
@@ -38,7 +34,7 @@
             };
 
             Assert.True(PngFromPdfImageFactory.TryGenerate(image, out var bytes));
-            Assert.Equal(LoadImage("3x3.png"), bytes);
+            Assert.True(ImageHelpers.ImagesAreEqual(LoadImage("3x3.png"), bytes));
         }
 
         [Fact]
@@ -60,7 +56,7 @@
             };
 
             Assert.True(PngFromPdfImageFactory.TryGenerate(image, out var bytes));
-            Assert.Equal(LoadImage("3x3.png"), bytes);
+            Assert.True(ImageHelpers.ImagesAreEqual(LoadImage("3x3.png"), bytes));
         }
 
         [Fact]
@@ -82,7 +78,7 @@
             };
 
             Assert.True(PngFromPdfImageFactory.TryGenerate(image, out var bytes));
-            Assert.Equal(LoadImage("3x3.png"), bytes);
+            Assert.True(ImageHelpers.ImagesAreEqual(LoadImage("3x3.png"), bytes));
         }
 
         [Fact]
@@ -104,7 +100,7 @@
             };
 
             Assert.True(PngFromPdfImageFactory.TryGenerate(image, out var bytes));
-            Assert.Equal(LoadImage("3x3.png"), bytes);
+            Assert.True(ImageHelpers.ImagesAreEqual(LoadImage("3x3.png"), bytes));
         }
 
         [Fact]
@@ -143,13 +139,125 @@
             };
 
             Assert.True(PngFromPdfImageFactory.TryGenerate(image, out var bytes));
-            Assert.Equal(LoadImage("3x3.png"), bytes);
+            Assert.True(ImageHelpers.ImagesAreEqual(LoadImage("3x3.png"), bytes));
+        }
+
+        [Fact]
+        public void CanGeneratePngFromCcittFaxDecodedImageData()
+        {
+            var decodedBytes = ImageHelpers.LoadFileBytes("ccittfax-decoded.bin");
+            var image = new TestPdfImage
+            {
+                ColorSpaceDetails = IndexedColorSpaceDetails.Stencil(DeviceGrayColorSpaceDetails.Instance, new[] { 1.0, 0 }),
+                DecodedBytes = decodedBytes,
+                WidthInSamples = 1800,
+                HeightInSamples = 3113,
+                BitsPerComponent = 1
+            };
+
+            Assert.True(PngFromPdfImageFactory.TryGenerate(image, out var bytes));
+            Assert.True(ImageHelpers.ImagesAreEqual(LoadImage("ccittfax.png"), bytes));
+        }
+
+        [Fact]
+        public void CanGeneratePngFromICCBasedImageData()
+        {
+            var decodedBytes = ImageHelpers.LoadFileBytes("iccbased-decoded.bin");
+            var image = new TestPdfImage
+            {
+                ColorSpaceDetails = new ICCBasedColorSpaceDetails(
+                    numberOfColorComponents: 3,
+                    alternateColorSpaceDetails: DeviceRgbColorSpaceDetails.Instance,
+                    range: new List<double> { 0, 1, 0, 1, 0, 1 },
+                    metadata: null),
+                DecodedBytes = decodedBytes,
+                WidthInSamples = 1,
+                HeightInSamples = 1,
+                BitsPerComponent = 8
+            };
+
+            Assert.True(PngFromPdfImageFactory.TryGenerate(image, out var bytes));
+            Assert.True(ImageHelpers.ImagesAreEqual(LoadImage("iccbased.png"), bytes));
+        }
+
+        [Fact]
+        public void AlternateColorSpaceDetailsIsCurrentlyUsedInPdfPigWhenGeneratingPngsFromICCBasedImageData()
+        {
+            var decodedBytes = ImageHelpers.LoadFileBytes("iccbased-decoded.bin");
+            var iccBasedImage = new TestPdfImage
+            {
+                ColorSpaceDetails = new ICCBasedColorSpaceDetails(
+                    numberOfColorComponents: 3,
+                    alternateColorSpaceDetails: DeviceRgbColorSpaceDetails.Instance,
+                    range: new List<double> { 0, 1, 0, 1, 0, 1 },
+                    metadata: null),
+                DecodedBytes = decodedBytes,
+                WidthInSamples = 1,
+                HeightInSamples = 1,
+                BitsPerComponent = 8
+            };
+
+            var deviceRGBImage = new TestPdfImage
+            {
+                ColorSpaceDetails = DeviceRgbColorSpaceDetails.Instance,
+                DecodedBytes = decodedBytes,
+                WidthInSamples = 1,
+                HeightInSamples = 1,
+                BitsPerComponent = 8
+            };
+
+            Assert.True(PngFromPdfImageFactory.TryGenerate(iccBasedImage, out var iccPngBytes));
+            Assert.True(PngFromPdfImageFactory.TryGenerate(deviceRGBImage, out var deviceRgbBytes));
+            Assert.Equal(iccPngBytes, deviceRgbBytes);
+        }
+
+        [Fact]
+        public void CanGeneratePngFromCalRGBImageData()
+        {
+            var decodedBytes = ImageHelpers.LoadFileBytes("calrgb-decoded.bin");
+            var image = new TestPdfImage
+            {
+                ColorSpaceDetails = new CalRGBColorSpaceDetails(
+                    whitePoint: [0.95043, 1, 1.09],
+                    blackPoint: null,
+                    gamma: [2.2, 2.2, 2.2],
+                    matrix: [
+                        0.41239, 0.21264, 0.01933,
+                        0.35758, 0.71517, 0.11919,
+                        0.18045, 0.07218, 0.9504]),
+                DecodedBytes = decodedBytes,
+                WidthInSamples = 153,
+                HeightInSamples = 83,
+                BitsPerComponent = 8
+            };
+
+            Assert.True(PngFromPdfImageFactory.TryGenerate(image, out var bytes));
+            Assert.True(ImageHelpers.ImagesAreEqual(LoadImage("calrgb.png"), bytes));
+        }
+
+        [Fact]
+        public void CanGeneratePngFromCalGrayImageData()
+        {
+            var decodedBytes = ImageHelpers.LoadFileBytes("calgray-decoded.bin", isCompressed: true);
+            var image = new TestPdfImage
+            {
+                ColorSpaceDetails = new CalGrayColorSpaceDetails(
+                    whitePoint: [0.9505000114, 1, 1.0889999866],
+                    blackPoint: null,
+                    gamma: 2.2000000477),
+                DecodedBytes = decodedBytes,
+                WidthInSamples = 2480,
+                HeightInSamples = 1748,
+                BitsPerComponent = 8,
+            };
+
+            Assert.True(PngFromPdfImageFactory.TryGenerate(image, out var bytes));
+            Assert.True(ImageHelpers.ImagesAreEqual(LoadImage("calgray.png"), bytes));
         }
 
         private static byte[] LoadImage(string name)
         {
-            var folder = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "Images", "Files"));
-            return File.ReadAllBytes(Path.Combine(folder, name));
+            return ImageHelpers.LoadFileBytes(name);
         }
     }
 }

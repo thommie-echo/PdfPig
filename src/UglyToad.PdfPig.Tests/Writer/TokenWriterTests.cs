@@ -1,21 +1,18 @@
 ﻿namespace UglyToad.PdfPig.Tests.Writer
 {
-    using Integration;
     using PdfPig.Writer;
-    using System.IO;
     using UglyToad.PdfPig.Tokens;
-    using Xunit;
 
     public class TokenWriterTests
     {
-
         [Fact]
         public void EscapeSpecialCharacter()
         {
+            var writer = new TokenWriter();
             using (var memStream = new MemoryStream())
             {
-                TokenWriter.WriteToken(new StringToken("\\"), memStream);
-                TokenWriter.WriteToken(new StringToken("(Hello)"), memStream);
+                writer.WriteToken(new StringToken("\\"), memStream);
+                writer.WriteToken(new StringToken("(Hello)"), memStream);
 
                 // Read Test
                 memStream.Position = 0;

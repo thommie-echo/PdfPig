@@ -1,4 +1,6 @@
-﻿namespace UglyToad.PdfPig.Content
+﻿#nullable disable
+
+namespace UglyToad.PdfPig.Content
 {
     using System.Collections.Generic;
     using Tokens;
@@ -6,17 +8,26 @@
     /// <summary>
     /// Contains the values inherited from the Page Tree for this page.
     /// </summary>
-    internal class PageTreeMembers
+    public sealed class PageTreeMembers
     {
-        public CropBox GetCropBox()
+        internal CropBox GetCropBox()
         {
             return null;
         }
 
-        public MediaBox MediaBox { get; set; }
+        /// <summary>
+        /// The page media box.
+        /// </summary>
+        public MediaBox MediaBox { get; internal set; }
 
-        public int Rotation { get; set; }
+        /// <summary>
+        /// The page rotation.
+        /// </summary>
+        public int Rotation { get; internal set; }
 
+        /// <summary>
+        /// The page parent resources.
+        /// </summary>
         public Queue<DictionaryToken> ParentResources { get; } = new Queue<DictionaryToken>();
     }
 }

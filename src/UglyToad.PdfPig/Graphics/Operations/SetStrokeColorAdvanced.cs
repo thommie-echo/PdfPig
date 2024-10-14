@@ -3,16 +3,16 @@
     using System.Collections.Generic;
     using System.IO;
     using System.Linq;
-    using Colors;
     using Tokens;
     using Writer;
 
-    /// <inheritdoc />
     /// <summary>
     /// Set the stroking color based on the current color space with support for Pattern, Separation, DeviceN, and ICCBased color spaces.
     /// </summary>
     public class SetStrokeColorAdvanced : IGraphicsStateOperation
     {
+        private static readonly TokenWriter TokenWriter = new TokenWriter();
+
         /// <summary>
         /// The symbol for this operation in a stream.
         /// </summary>
@@ -24,18 +24,18 @@
         /// <summary>
         /// The values for the color.
         /// </summary>
-        public IReadOnlyList<decimal> Operands { get; }
+        public IReadOnlyList<double> Operands { get; }
 
         /// <summary>
         /// The name of an entry in the Pattern subdictionary of the current resource dictionary.
         /// </summary>
-        public NameToken PatternName { get; }
+        public NameToken? PatternName { get; }
 
         /// <summary>
         /// Create a new <see cref="SetStrokeColor"/>.
         /// </summary>
         /// <param name="operands">The color operands.</param>
-        public SetStrokeColorAdvanced(IReadOnlyList<decimal> operands)
+        public SetStrokeColorAdvanced(IReadOnlyList<double> operands)
         {
             Operands = operands;
         }
@@ -45,7 +45,7 @@
         /// </summary>
         /// <param name="operands">The color operands.</param>
         /// <param name="patternName">The pattern name.</param>
-        public SetStrokeColorAdvanced(IReadOnlyList<decimal> operands, NameToken patternName)
+        public SetStrokeColorAdvanced(IReadOnlyList<double> operands, NameToken patternName)
         {
             Operands = operands;
             PatternName = patternName;
@@ -54,26 +54,7 @@
         /// <inheritdoc />
         public void Run(IOperationContext operationContext)
         {
-            if (operationContext.ColorSpaceContext.CurrentStrokingColorSpace.GetFamily() != ColorSpaceFamily.Device
-                || operationContext.ColorSpaceContext.AdvancedStrokingColorSpace != null)
-            {
-                return;
-            }
-
-            switch (Operands.Count)
-            {
-                case 1:
-                    operationContext.ColorSpaceContext.SetStrokingColorGray(Operands[0]);
-                    break;
-                case 3:
-                    operationContext.ColorSpaceContext.SetStrokingColorRgb(Operands[0], Operands[1], Operands[2]);
-                    break;
-                case 4:
-                    operationContext.ColorSpaceContext.SetStrokingColorCmyk(Operands[0], Operands[1], Operands[2], Operands[3]);
-                    break;
-                default:
-                    return;
-            }
+            operationContext.GetCurrentState().ColorSpaceContext.SetStrokingColor(Operands, PatternName);
         }
 
         /// <inheritdoc />
@@ -81,7 +62,7 @@
         {
             foreach (var operand in Operands)
             {
-                stream.WriteDecimal(operand);
+                stream.WriteDouble(operand);
                 stream.WriteWhiteSpace();
             }
 

@@ -5,13 +5,12 @@
     using Tokenization.Scanner;
     using Tokens;
     using Util;
-    using Util.JetBrains.Annotations;
 
     internal static class FontDescriptorFactory
     {
         public static FontDescriptor Generate(DictionaryToken dictionary, IPdfTokenScanner pdfScanner)
         {
-            if (dictionary == null)
+            if (dictionary is null)
             {
                 throw new ArgumentNullException(nameof(dictionary));
             }
@@ -28,25 +27,25 @@
             {
                  FontFamily = family,
                  Stretch = stretch,
-                 FontWeight = GetDecimalOrDefault(dictionary, NameToken.FontWeight),
+                 FontWeight = GetDoubleOrDefault(dictionary, NameToken.FontWeight),
                  BoundingBox = bounding,
-                 ItalicAngle = GetDecimalOrDefault(dictionary, NameToken.ItalicAngle),
-                 Ascent = GetDecimalOrDefault(dictionary, NameToken.Ascent),
-                 Descent = GetDecimalOrDefault(dictionary, NameToken.Descent),
-                 Leading = GetDecimalOrDefault(dictionary, NameToken.Leading),
-                 CapHeight = Math.Abs(GetDecimalOrDefault(dictionary, NameToken.CapHeight)),
-                 XHeight = Math.Abs(GetDecimalOrDefault(dictionary, NameToken.Xheight)),
-                 StemVertical = GetDecimalOrDefault(dictionary, NameToken.StemV),
-                 StemHorizontal = GetDecimalOrDefault(dictionary, NameToken.StemH),
-                 AverageWidth = GetDecimalOrDefault(dictionary, NameToken.AvgWidth),
-                 MaxWidth = GetDecimalOrDefault(dictionary, NameToken.MaxWidth),
-                 MissingWidth = GetDecimalOrDefault(dictionary, NameToken.MissingWidth),
+                 ItalicAngle = GetDoubleOrDefault(dictionary, NameToken.ItalicAngle),
+                 Ascent = GetDoubleOrDefault(dictionary, NameToken.Ascent),
+                 Descent = GetDoubleOrDefault(dictionary, NameToken.Descent),
+                 Leading = GetDoubleOrDefault(dictionary, NameToken.Leading),
+                 CapHeight = Math.Abs(GetDoubleOrDefault(dictionary, NameToken.CapHeight)),
+                 XHeight = Math.Abs(GetDoubleOrDefault(dictionary, NameToken.Xheight)),
+                 StemVertical = GetDoubleOrDefault(dictionary, NameToken.StemV),
+                 StemHorizontal = GetDoubleOrDefault(dictionary, NameToken.StemH),
+                 AverageWidth = GetDoubleOrDefault(dictionary, NameToken.AvgWidth),
+                 MaxWidth = GetDoubleOrDefault(dictionary, NameToken.MaxWidth),
+                 MissingWidth = GetDoubleOrDefault(dictionary, NameToken.MissingWidth),
                  FontFile = fontFile,
                  CharSet = charSet
             }.Build();
         }
 
-        private static decimal GetDecimalOrDefault(DictionaryToken dictionary, NameToken name)
+        private static double GetDoubleOrDefault(DictionaryToken dictionary, NameToken name)
         {
             if (!dictionary.TryGet(name, out var token) || !(token is NumericToken number))
             {
@@ -58,7 +57,7 @@
 
         private static NameToken GetFontName(DictionaryToken dictionary, IPdfTokenScanner scanner)
         {
-            if (!dictionary.TryGet(NameToken.FontName, scanner, out NameToken name))
+            if (!dictionary.TryGet(NameToken.FontName, scanner, out NameToken? name))
             {
                 name = NameToken.Create(string.Empty);
             }
@@ -113,7 +112,7 @@
             return boxArray.ToRectangle(pdfScanner);
         }
 
-        private static string GetCharSet(DictionaryToken dictionary)
+        private static string? GetCharSet(DictionaryToken dictionary)
         {
             if (!dictionary.TryGet(NameToken.CharSet, out var set) || !(set is NameToken setName))
             {
@@ -123,8 +122,7 @@
             return setName.Data;
         }
 
-        [CanBeNull]
-        private static DescriptorFontFile GetFontFile(DictionaryToken dictionary)
+        private static DescriptorFontFile? GetFontFile(DictionaryToken dictionary)
         {
             if (dictionary.TryGet(NameToken.FontFile, out var value))
             {

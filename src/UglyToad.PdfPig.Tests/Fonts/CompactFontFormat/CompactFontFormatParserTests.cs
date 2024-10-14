@@ -1,10 +1,6 @@
 ﻿namespace UglyToad.PdfPig.Tests.Fonts.CompactFontFormat
 {
-    using System;
-    using System.IO;
-    using System.Linq;
     using PdfPig.Fonts.CompactFontFormat;
-    using Xunit;
 
     public class CompactFontFormatParserTests
     {
@@ -16,7 +12,7 @@
             var font = CompactFontFormatParser.Parse(new CompactFontFormatData(fileBytes));
 
             Assert.Equal(1, font.Header.MajorVersion);
-            Assert.Equal(1, font.Fonts.Count);
+            Assert.Single(font.Fonts);
             Assert.True(font.Fonts.ContainsKey("MinionPro-It"));
         }
 

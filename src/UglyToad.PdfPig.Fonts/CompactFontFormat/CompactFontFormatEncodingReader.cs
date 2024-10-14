@@ -5,10 +5,11 @@
     using Charsets;
     using Encodings;
     using Fonts;
+    using UglyToad.PdfPig.Core;
 
     internal static class CompactFontFormatEncodingReader
     {
-        public static Encoding ReadEncoding(CompactFontFormatData data, ICompactFontFormatCharset charset, IReadOnlyList<string> stringIndex)
+        public static Encoding ReadEncoding(CompactFontFormatData data, ICompactFontFormatCharset charset, ReadOnlySpan<string> stringIndex)
         {
             if (data == null)
             {
@@ -32,29 +33,29 @@
             }
         }
 
-        private static CompactFontFormatFormat0Encoding ReadFormat0Encoding(CompactFontFormatData data, ICompactFontFormatCharset charset, IReadOnlyList<string> stringIndex, byte format)
+        private static CompactFontFormatFormat0Encoding ReadFormat0Encoding(CompactFontFormatData data, ICompactFontFormatCharset charset, ReadOnlySpan<string> stringIndex, byte format)
         {
             var numberOfCodes = data.ReadCard8();
 
-            var values = new List<(int code, int sid, string str)>();
+            using var values = new ArrayPoolBufferWriter<(int code, int sid, string str)>();
             for (var i = 1; i <= numberOfCodes; i++)
             {
                 var code = data.ReadCard8();
                 var sid = charset.GetStringIdByGlyphId(i);
                 var str = ReadString(sid, stringIndex);
-                values.Add((code, sid, str));
+                values.Write((code, sid, str));
             }
 
-            IReadOnlyList<CompactFontFormatBuiltInEncoding.Supplement> supplements = new List<CompactFontFormatBuiltInEncoding.Supplement>();
+            IReadOnlyList<CompactFontFormatBuiltInEncoding.Supplement> supplements = [];
             if (HasSupplement(format))
             {
                 supplements = ReadSupplement(data, stringIndex);
             }
 
-            return new CompactFontFormatFormat0Encoding(values, supplements);
+            return new CompactFontFormatFormat0Encoding(values.WrittenSpan, supplements);
         }
 
-        private static CompactFontFormatFormat1Encoding ReadFormat1Encoding(CompactFontFormatData data, ICompactFontFormatCharset charset, IReadOnlyList<string> stringIndex, byte format)
+        private static CompactFontFormatFormat1Encoding ReadFormat1Encoding(CompactFontFormatData data, ICompactFontFormatCharset charset, ReadOnlySpan<string> stringIndex, byte format)
         {
             var numberOfRanges = data.ReadCard8();
 
@@ -85,7 +86,7 @@
         }
 
         private static IReadOnlyList<CompactFontFormatBuiltInEncoding.Supplement> ReadSupplement(CompactFontFormatData dataInput,
-            IReadOnlyList<string> stringIndex)
+            ReadOnlySpan<string> stringIndex)
         {
             var numberOfSupplements = dataInput.ReadCard8();
             var supplements = new CompactFontFormatBuiltInEncoding.Supplement[numberOfSupplements];
@@ -101,13 +102,13 @@
             return supplements;
         }
         
-        private static string ReadString(int index, IReadOnlyList<string> stringIndex)
+        private static string ReadString(int index, ReadOnlySpan<string> stringIndex)
         {
             if (index >= 0 && index <= 390)
             {
                 return CompactFontFormatStandardStrings.GetName(index);
             }
-            if (index - 391 < stringIndex.Count)
+            if (index - 391 < stringIndex.Length)
             {
                 return stringIndex[index - 391];
             }

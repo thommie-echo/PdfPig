@@ -5,6 +5,7 @@
     using System.Linq;
     using Core;
     using Tokens;
+    using UglyToad.PdfPig.Util;
 
     /// <inheritdoc />
     /// <summary>
@@ -55,14 +56,15 @@
         /// <inheritdoc />
         public IReadOnlyList<IFilter> GetFilters(DictionaryToken dictionary)
         {
-            if (dictionary == null)
+            if (dictionary is null)
             {
                 throw new ArgumentNullException(nameof(dictionary));
             }
 
-            if (!dictionary.TryGet(NameToken.Filter, out var token))
+            var token = dictionary.GetObjectOrDefault(NameToken.Filter, NameToken.F);
+            if (token is null)
             {
-                return EmptyArray<IFilter>.Instance;
+                return Array.Empty<IFilter>();
             }
 
             switch (token)
@@ -87,7 +89,7 @@
         /// <inheritdoc />
         public IReadOnlyList<IFilter> GetNamedFilters(IReadOnlyList<NameToken> names)
         {
-            if (names == null)
+            if (names is null)
             {
                 throw new ArgumentNullException(nameof(names));
             }

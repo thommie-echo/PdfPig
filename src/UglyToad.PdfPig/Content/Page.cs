@@ -3,21 +3,21 @@
     using System;
     using System.Collections.Generic;
     using System.Text;
+    using System.Linq;
     using Annotations;
+    using Geometry;
     using Graphics.Operations;
     using Tokens;
     using Util;
-    using Util.JetBrains.Annotations;
     using Tokenization.Scanner;
     using Graphics;
-    using System.Linq;
 
     /// <summary>
     /// Contains the content and provides access to methods of a single page in the <see cref="PdfDocument"/>.
     /// </summary>
     public class Page
     {
-        private readonly AnnotationProvider annotationProvider;
+        internal readonly AnnotationProvider annotationProvider;
         internal readonly IPdfTokenScanner pdfScanner;
         private readonly Lazy<string> textLazy;
 
@@ -51,7 +51,7 @@
         /// <summary>
         /// The set of <see cref="Letter"/>s drawn by the PDF content.
         /// </summary>
-        public IReadOnlyList<Letter> Letters => Content?.Letters ?? new Letter[0];
+        public IReadOnlyList<Letter> Letters => Content.Letters;
 
         /// <summary>
         /// The full text of all characters on the page in the order they are presented in the PDF content.
@@ -79,17 +79,17 @@
         public int NumberOfImages => Content.NumberOfImages;
 
         /// <summary>
-        /// The parsed graphics state operations in the content stream for this page. 
+        /// The parsed graphics state operations in the content stream for this page.
         /// </summary>
         public IReadOnlyList<IGraphicsStateOperation> Operations => Content.GraphicsStateOperations;
-        
+
         /// <summary>
         /// Access to members whose future locations within the API will change without warning.
         /// </summary>
-        [NotNull]
         public Experimental ExperimentalAccess { get; }
 
-        internal Page(int number, DictionaryToken dictionary, MediaBox mediaBox, CropBox cropBox, PageRotationDegrees rotation, PageContent content,
+        internal Page(int number, DictionaryToken dictionary, MediaBox mediaBox, CropBox cropBox, PageRotationDegrees rotation,
+            PageContent content,
             AnnotationProvider annotationProvider,
             IPdfTokenScanner pdfScanner)
         {
@@ -97,7 +97,12 @@
             {
                 throw new ArgumentOutOfRangeException(nameof(number), "Page number cannot be 0 or negative.");
             }
-            
+
+            if (content is null)
+            {
+                throw new ArgumentNullException(nameof(content));
+            }
+
             Dictionary = dictionary ?? throw new ArgumentNullException(nameof(dictionary));
 
             Number = number;
@@ -107,10 +112,13 @@
             Content = content;
             textLazy = new Lazy<string>(() => GetText(Content));
 
-            Width = mediaBox.Bounds.Width;
-            Height = mediaBox.Bounds.Height;
+            // Special case where cropbox is outside mediabox: use cropbox instead of intersection
+            var viewBox = mediaBox.Bounds.Intersect(cropBox.Bounds) ?? cropBox.Bounds;
 
-            Size = mediaBox.Bounds.GetPageSize();
+            Width = viewBox.Width;
+            Height = viewBox.Height;
+            Size = viewBox.GetPageSize();
+
             ExperimentalAccess = new Experimental(this, annotationProvider);
             this.annotationProvider = annotationProvider;
             this.pdfScanner = pdfScanner ?? throw new ArgumentNullException(nameof(pdfScanner));
@@ -118,11 +126,32 @@
 
         private static string GetText(PageContent content)
         {
-            if (content?.Letters == null)
+            if (content?.Letters is null)
             {
                 return string.Empty;
             }
 
+#if NET
+            int length = 0;
+
+            for (var i = 0; i < content.Letters.Count; i++)
+            {
+                length += content.Letters[i].Value.Length;
+            }
+
+            return string.Create(length, content, static (buffer, content) => {
+                int position = 0;
+
+                for (var i = 0; i < content.Letters.Count; i++)
+                {
+                    var value = content.Letters[i].Value;
+
+                    value.AsSpan().CopyTo(buffer[position..]);
+
+                    position += value.Length;
+                }
+            });
+#else
             var builder = new StringBuilder();
             for (var i = 0; i < content.Letters.Count; i++)
             {
@@ -130,6 +159,7 @@
             }
 
             return builder.ToString();
+#endif
         }
 
         /// <summary>
@@ -211,12 +241,12 @@
                 // TO DO
                 //var annots = GetAnnotations().ToList();
 
-                return mcesOptional.GroupBy(oc => oc.Name).ToDictionary(g => g.Key, g => g.ToList() as IReadOnlyList<OptionalContentGroupElement>);
+                return mcesOptional.GroupBy(oc => oc.Name).ToDictionary(g => g.Key!, g => (IReadOnlyList<OptionalContentGroupElement>)g.ToList());
             }
 
-            private void GetOptionalContentsRecursively(IReadOnlyList<MarkedContentElement> markedContentElements, ref List<OptionalContentGroupElement> mcesOptional)
+            private void GetOptionalContentsRecursively(IReadOnlyList<MarkedContentElement>? markedContentElements, ref List<OptionalContentGroupElement> mcesOptional)
             {
-                if (markedContentElements.Count == 0)
+                if (markedContentElements is null || markedContentElements.Count == 0)
                 {
                     return;
                 }

@@ -3,12 +3,13 @@
     using System;
     using System.Collections.Generic;
     using Tokens;
+    using UglyToad.PdfPig.Util;
 
     internal static class DecodeParameterResolver
     {
         public static DictionaryToken GetFilterParameters(DictionaryToken streamDictionary, int index)
         {
-            if (streamDictionary == null)
+            if (streamDictionary is null)
             {
                 throw new ArgumentNullException(nameof(streamDictionary));
             }
@@ -18,9 +19,9 @@
                 throw new ArgumentOutOfRangeException(nameof(index), "Index must be 0 or greater");
             }
 
-            var filter = GetDictionaryObject(streamDictionary, NameToken.Filter, NameToken.F);
+            var filter = streamDictionary.GetObjectOrDefault(NameToken.Filter, NameToken.F);
 
-            var parameters = GetDictionaryObject(streamDictionary, NameToken.DecodeParms, NameToken.Dp);
+            var parameters = streamDictionary.GetObjectOrDefault(NameToken.DecodeParms, NameToken.Dp);
 
             switch (filter)
             {
@@ -33,7 +34,7 @@
                 case ArrayToken array:
                     if (parameters is ArrayToken arr)
                     {
-                        if (index < arr.Data.Count && array.Data[index] is DictionaryToken dictionary)
+                        if (index < arr.Data.Count && arr.Data[index] is DictionaryToken dictionary)
                         {
                             return dictionary;
                         }
@@ -44,21 +45,6 @@
             }
 
             return new DictionaryToken(new Dictionary<NameToken, IToken>());
-        }
-
-        private static IToken GetDictionaryObject(DictionaryToken dictionary, NameToken first, NameToken second)
-        {
-            if (dictionary.TryGet(first, out var token))
-            {
-                return token;
-            }
-
-            if (dictionary.TryGet(second, out token))
-            {
-                return token;
-            }
-
-            return null;
         }
     }
 }

@@ -1,17 +1,17 @@
 ﻿namespace UglyToad.PdfPig.Fonts.CompactFontFormat.CharStrings
 {
+    using Core;
     using System;
     using System.Collections.Generic;
     using System.Globalization;
     using System.Text;
-    using Core;
 
     /// <summary>
     /// Stores the decoded command sequences for Type 2 CharStrings from a Compact Font Format font as well
     /// as the local (per font) and global (per font set) subroutines.
     /// The CharStrings are lazily evaluated.
     /// </summary>
-    internal class Type2CharStrings
+    internal sealed class Type2CharStrings
     {
         private readonly object locker = new object();
         private readonly Dictionary<string, Type2Glyph> glyphs = new Dictionary<string, Type2Glyph>();
@@ -20,7 +20,6 @@
         /// The decoded charstrings in this font.
         /// </summary>
         public IReadOnlyDictionary<string, CommandSequence> CharStrings { get; }
-
 
         public Type2CharStrings(IReadOnlyDictionary<string, CommandSequence> charStrings)
         {
@@ -46,7 +45,7 @@
 
                 if (!CharStrings.TryGetValue(name, out var sequence))
                 {
-                    if (!CharStrings.TryGetValue(".notdef", out sequence))
+                    if (!CharStrings.TryGetValue(GlyphList.NotDefined, out sequence))
                     {
                         throw new InvalidOperationException($"No charstring sequence with the name /{name} in this font.");
                     }
@@ -70,7 +69,7 @@
         private static Type2Glyph Run(CommandSequence sequence, double defaultWidthX, double nominalWidthX)
         {
             var context = new Type2BuildCharContext();
-            
+
             var hasRunStackClearingCommand = false;
             for (var i = -1; i < sequence.Values.Count; i++)
             {
@@ -150,7 +149,7 @@
             }
         }
 
-        public class CommandSequence
+        public sealed class CommandSequence
         {
             public IReadOnlyList<float> Values { get; }
             public IReadOnlyList<CommandIdentifier> CommandIdentifiers { get; }
@@ -158,7 +157,6 @@
             /// <summary>
             /// The ordered list of numbers and commands for a Type 2 charstring or subroutine.
             /// </summary>
-
             public CommandSequence(IReadOnlyList<float> values, IReadOnlyList<CommandIdentifier> commandIdentifiers)
             {
                 Values = values;
@@ -197,7 +195,7 @@
                 return stringBuilder.ToString();
             }
 
-            public struct CommandIdentifier
+            public readonly struct CommandIdentifier
             {
                 public int CommandIndex { get; }
 
@@ -219,12 +217,12 @@
     /// Since Type 2 CharStrings may define their width as the first argument (as a delta from the font's nominal width X)
     /// we can retrieve both details for the Type 2 glyph.
     /// </summary>
-    internal class Type2Glyph
+    internal sealed class Type2Glyph
     {
         /// <summary>
         /// The path of the glyph.
         /// </summary>
-        public PdfSubpath Path { get; }
+        public IReadOnlyList<PdfSubpath> Path { get; }
 
         /// <summary>
         /// The width of the glyph as a difference from the nominal width X for the font. Optional.
@@ -234,7 +232,7 @@
         /// <summary>
         /// Create a new <see cref="Type2Glyph"/>.
         /// </summary>
-        public Type2Glyph(PdfSubpath path, double? width)
+        public Type2Glyph(IReadOnlyList<PdfSubpath> path, double? width)
         {
             Path = path ?? throw new ArgumentNullException(nameof(path));
             Width = width;

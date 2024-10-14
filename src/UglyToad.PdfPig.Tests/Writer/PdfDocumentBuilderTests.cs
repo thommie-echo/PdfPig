@@ -1,7 +1,5 @@
 ﻿namespace UglyToad.PdfPig.Tests.Writer
 {
-    using System.IO;
-    using System.Linq;
     using Content;
     using Integration;
     using PdfPig.Core;
@@ -9,7 +7,9 @@
     using PdfPig.Tokens;
     using PdfPig.Writer;
     using Tests.Fonts.TrueType;
-    using Xunit;
+    using UglyToad.PdfPig.Graphics.Operations.InlineImages;
+    using UglyToad.PdfPig.Outline;
+    using UglyToad.PdfPig.Outline.Destinations;
 
     public class PdfDocumentBuilderTests
     {
@@ -56,6 +56,80 @@
         }
 
         [Fact]
+        public void CanFastAddPageAndInheritProps()
+        {
+            var first = IntegrationHelpers.GetDocumentPath("inherited_mediabox.pdf");
+            var contents = File.ReadAllBytes(first);
+
+
+            byte[] results = null;
+            using (var existing = PdfDocument.Open(contents, ParsingOptions.LenientParsingOff))
+            using (var output = new PdfDocumentBuilder())
+            {
+                output.AddPage(existing, 1);
+                results = output.Build();
+            }
+
+            using (var rewritted = PdfDocument.Open(results, ParsingOptions.LenientParsingOff))
+            {
+                var pg = rewritted.GetPage(1);
+                Assert.Equal(200, pg.MediaBox.Bounds.Width);
+                Assert.Equal(100, pg.MediaBox.Bounds.Height);
+            }
+        }
+
+        [Fact]
+        public void CanFastAddPageWithStreamSubtype()
+        {
+            var first = IntegrationHelpers.GetDocumentPath("steam_in_page_dict.pdf");
+            var contents = File.ReadAllBytes(first);
+
+
+            byte[] results = null;
+            using (var existing = PdfDocument.Open(contents, ParsingOptions.LenientParsingOff))
+            using (var output = new PdfDocumentBuilder())
+            {
+                output.AddPage(existing, 1);
+                results = output.Build();
+            }
+
+            using (var rewritted = PdfDocument.Open(results, ParsingOptions.LenientParsingOff))
+            {
+                // really just checking for no exception...
+                var pg = rewritted.GetPage(1);
+                Assert.NotNull(pg.Content);
+            }
+        }
+
+        [Fact]
+        public void CanFastAddPageAndStripLinkAnnots()
+        {
+            var first = IntegrationHelpers.GetDocumentPath("outline.pdf");
+            var contents = File.ReadAllBytes(first);
+
+            var annotCount = 0;
+            byte[] results = null;
+            using (var existing = PdfDocument.Open(contents, ParsingOptions.LenientParsingOff))
+            using (var output = new PdfDocumentBuilder())
+            {
+                output.AddPage(existing, 1);
+                results = output.Build();
+                var pg = existing.GetPage(1);
+                var annots = pg.ExperimentalAccess.GetAnnotations().ToList();
+                annotCount = annots.Count;
+                Assert.Contains(annots, x => x.Type == Annotations.AnnotationType.Link);
+            }
+
+            using (var rewritten = PdfDocument.Open(results, ParsingOptions.LenientParsingOff))
+            {
+                var pg = rewritten.GetPage(1);
+                var annots = pg.ExperimentalAccess.GetAnnotations().ToList();
+                Assert.Equal(annotCount - 1, annots.Count);
+                Assert.DoesNotContain(annots, x => x.Type == Annotations.AnnotationType.Link);
+            }
+        }
+
+        [Fact]
         public void CanReadSingleBlankPage()
         {
             var result = CreateSingleBlankPage();
@@ -92,6 +166,9 @@
             return result;
         }
 
+
+
+
         [Fact]
         public void CanWriteSinglePageStandard14FontHelloWorld()
         {
@@ -100,7 +177,7 @@
             PdfPageBuilder page = builder.AddPage(PageSize.A4);
 
             PdfDocumentBuilder.AddedFont font = builder.AddStandard14Font(Standard14Font.Helvetica);
-            
+
             page.AddText("Hello World!", 12, new PdfPoint(25, 520), font);
 
             var b = builder.Build();
@@ -111,7 +188,63 @@
             {
                 var page1 = document.GetPage(1);
 
-                Assert.Equal(new[] {"Hello", "World!"}, page1.GetWords().Select(x => x.Text));
+                Assert.Equal(new[] { "Hello", "World!" }, page1.GetWords().Select(x => x.Text));
+            }
+        }
+
+        [Fact]
+        public void CanWriteSinglePageInvisibleHelloWorld()
+        {
+            var builder = new PdfDocumentBuilder();
+
+            PdfPageBuilder page = builder.AddPage(PageSize.A4);
+
+            PdfDocumentBuilder.AddedFont font = builder.AddStandard14Font(Standard14Font.Helvetica);
+
+            page.SetTextRenderingMode(TextRenderingMode.Neither);
+
+            page.AddText("Hello World!", 12, new PdfPoint(25, 520), font);
+
+            var b = builder.Build();
+
+            WriteFile(nameof(CanWriteSinglePageInvisibleHelloWorld), b);
+
+            using (var document = PdfDocument.Open(b))
+            {
+                var page1 = document.GetPage(1);
+
+                Assert.Equal(new[] { "Hello", "World!" }, page1.GetWords().Select(x => x.Text));
+            }
+        }
+
+        [Fact]
+        public void CanWriteSinglePageMixedRenderingMode()
+        {
+            var builder = new PdfDocumentBuilder();
+
+            PdfPageBuilder page = builder.AddPage(PageSize.A4);
+
+            PdfDocumentBuilder.AddedFont font = builder.AddStandard14Font(Standard14Font.Helvetica);
+
+            page.AddText("Hello World!", 12, new PdfPoint(25, 520), font);
+
+            page.SetTextRenderingMode(TextRenderingMode.Neither);
+
+            page.AddText("Invisible!", 12, new PdfPoint(25, 500), font);
+
+            page.SetTextRenderingMode(TextRenderingMode.Fill);
+
+            page.AddText("Filled again!", 12, new PdfPoint(25, 480), font);
+
+            var b = builder.Build();
+
+            WriteFile(nameof(CanWriteSinglePageMixedRenderingMode), b);
+
+            using (var document = PdfDocument.Open(b))
+            {
+                var page1 = document.GetPage(1);
+
+                Assert.Equal(new[] { "Hello", "World!", "Invisible!", "Filled", "again!" }, page1.GetWords().Select(x => x.Text));
             }
         }
 
@@ -128,8 +261,8 @@
             page.SetStrokeColor(250, 132, 131);
             page.DrawLine(new PdfPoint(25, 70), new PdfPoint(100, 70), 3);
             page.ResetColor();
-            page.DrawRectangle(new PdfPoint(30, 200), 250, 100, 0.5m);
-            page.DrawRectangle(new PdfPoint(30, 100), 250, 100, 0.5m);
+            page.DrawRectangle(new PdfPoint(30, 200), 250, 100, 0.5);
+            page.DrawRectangle(new PdfPoint(30, 100), 250, 100, 0.5);
 
             var file = TrueTypeTestHelper.GetFileBytes("Andada-Regular.ttf");
 
@@ -182,7 +315,7 @@
             builder.DocumentInformation.Title = "Hello Roboto!";
 
             var page = builder.AddPage(PageSize.A4);
-            
+
             var font = builder.AddTrueTypeFont(TrueTypeTestHelper.GetFileBytes("Roboto-Regular.ttf"));
 
             page.AddText("eé", 12, new PdfPoint(30, 520), font);
@@ -322,12 +455,12 @@
         {
             var builder = new PdfDocumentBuilder();
             var page = builder.AddPage(PageSize.A4);
-            
+
             var file = TrueTypeTestHelper.GetFileBytes("Roboto-Regular.ttf");
 
             var font = builder.AddTrueTypeFont(file);
 
-            page.AddText("é (lower case, upper case É).", 9, 
+            page.AddText("é (lower case, upper case É).", 9,
                 new PdfPoint(30, page.PageSize.Height - 50), font);
 
             var bytes = builder.Build();
@@ -347,7 +480,7 @@
             var builder = new PdfDocumentBuilder();
             var page1 = builder.AddPage(PageSize.A4);
             var page2 = builder.AddPage(PageSize.A4);
-            
+
             var font = builder.AddTrueTypeFont(TrueTypeTestHelper.GetFileBytes("Roboto-Regular.ttf"));
 
             var topLine = new PdfPoint(30, page1.PageSize.Height - 60);
@@ -355,10 +488,10 @@
             page1.AddText("incididunt ut labore et dolore magna aliqua.", 9, new PdfPoint(30, topLine.Y - letters.Max(x => x.GlyphRectangle.Height) - 5), font);
 
             var page2Letters = page2.AddText("The very hungry caterpillar ate all the apples in the garden.", 12, topLine, font);
-            var left = (decimal)page2Letters[0].GlyphRectangle.Left;
-            var bottom = (decimal)page2Letters.Min(x => x.GlyphRectangle.Bottom);
-            var right = (decimal)page2Letters[page2Letters.Count - 1].GlyphRectangle.Right;
-            var top = (decimal)page2Letters.Max(x => x.GlyphRectangle.Top);
+            var left = page2Letters[0].GlyphRectangle.Left;
+            var bottom = page2Letters.Min(x => x.GlyphRectangle.Bottom);
+            var right = page2Letters[page2Letters.Count - 1].GlyphRectangle.Right;
+            var top = page2Letters.Max(x => x.GlyphRectangle.Top);
             page2.SetStrokeColor(10, 250, 69);
             page2.DrawRectangle(new PdfPoint(left, bottom), right - left, top - bottom);
 
@@ -376,13 +509,13 @@
                 Assert.StartsWith("The very hungry caterpillar", page2Out.Text);
             }
         }
-        
+
         [Fact]
         public void CanWriteSinglePageWithCzechCharacters()
         {
             var builder = new PdfDocumentBuilder();
             var page = builder.AddPage(PageSize.A4);
-            
+
             var font = builder.AddTrueTypeFont(TrueTypeTestHelper.GetFileBytes("Roboto-Regular.ttf"));
 
             page.AddText("Hello: řó", 9,
@@ -416,7 +549,7 @@
             var imageBytes = File.ReadAllBytes(img);
 
             page.AddJpeg(imageBytes, expectedBounds);
-            
+
             var bytes = builder.Build();
             WriteFile(nameof(CanWriteSinglePageWithJpeg), bytes);
 
@@ -433,7 +566,7 @@
                 Assert.Equal(expectedBounds.BottomLeft, image.Bounds.BottomLeft);
                 Assert.Equal(expectedBounds.TopRight, image.Bounds.TopRight);
 
-                Assert.Equal(imageBytes, image.RawBytes);
+                Assert.Equal(imageBytes, image.RawMemory.ToArray());
             }
         }
 
@@ -489,9 +622,9 @@
 
                 Assert.Equal(expectedBounds3, image3.Bounds);
 
-                Assert.Equal(imageBytes, image1.RawBytes);
-                Assert.Equal(imageBytes, image2.RawBytes);
-                Assert.Equal(imageBytes, image3.RawBytes);
+                Assert.Equal(imageBytes, image1.RawMemory.ToArray());
+                Assert.Equal(imageBytes, image2.RawMemory.ToArray());
+                Assert.Equal(imageBytes, image3.RawMemory.ToArray());
             }
         }
 
@@ -500,6 +633,8 @@
         [InlineData(PdfAStandard.A1A)]
         [InlineData(PdfAStandard.A2B)]
         [InlineData(PdfAStandard.A2A)]
+        [InlineData(PdfAStandard.A3B)]
+        [InlineData(PdfAStandard.A3A)]
         public void CanGeneratePdfAFile(PdfAStandard standard)
         {
             var builder = new PdfDocumentBuilder
@@ -598,8 +733,8 @@
             page.SetTextAndFillColor(255, 0, 0);
             page.SetStrokeColor(0, 0, 255);
 
-            page.DrawRectangle(new PdfPoint(20, 100), 200, 100, 1.5m, true);
-            
+            page.DrawRectangle(new PdfPoint(20, 100), 200, 100, 1.5, true);
+
             var file = builder.Build();
             WriteFile(nameof(CanCreateDocumentWithFilledRectangle), file);
         }
@@ -680,14 +815,14 @@
 
             using (var document = PdfDocument.Open(b))
             {
-                Assert.Equal( 2, document.NumberOfPages);
+                Assert.Equal(2, document.NumberOfPages);
 
                 var page1 = document.GetPage(1);
 
                 Assert.Equal("Hello", page1.Text);
 
                 var page2 = document.GetPage(2);
-                
+
                 Assert.Equal("Lorem ipsum dolor sit amet, consectetur adipiscing elit. ", page2.Text);
             }
         }
@@ -707,8 +842,8 @@
             page.SetStrokeColor(250, 132, 131);
             page.DrawLine(new PdfPoint(25, 70), new PdfPoint(100, 70), 3);
             page.ResetColor();
-            page.DrawRectangle(new PdfPoint(30, 200), 250, 100, 0.5m);
-            page.DrawRectangle(new PdfPoint(30, 100), 250, 100, 0.5m);
+            page.DrawRectangle(new PdfPoint(30, 200), 250, 100, 0.5);
+            page.DrawRectangle(new PdfPoint(30, 100), 250, 100, 0.5);
 
             var file = TrueTypeTestHelper.GetFileBytes("Andada-Regular.ttf");
 
@@ -740,7 +875,7 @@
 
                 for (int i = 0; i < letters.Count; i++)
                 {
-                    var readerLetter = page1.Letters[i+18];
+                    var readerLetter = page1.Letters[i + 18];
                     var writerLetter = letters[i];
 
                     Assert.Equal(readerLetter.Value, writerLetter.Value);
@@ -760,7 +895,7 @@
             var two = IntegrationHelpers.GetDocumentPath("Single Page Simple - from inkscape.pdf");
 
 
-            using (var docOne = PdfDocument.Open(one)) 
+            using (var docOne = PdfDocument.Open(one))
             using (var docTwo = PdfDocument.Open(two))
             {
                 var builder = new PdfDocumentBuilder();
@@ -781,14 +916,14 @@
             using (var docTwo = PdfDocument.Open(two))
             using (var builder = new PdfDocumentBuilder())
             {
-                
+
                 builder.AddPage(docOne, 1);
                 builder.AddPage(docTwo, 1);
                 var result = builder.Build();
                 PdfMergerTests.CanMerge2SimpleDocumentsAssertions(new MemoryStream(result), "Write something inInkscape", "I am a simple pdf.", false);
             }
 
-            
+
         }
 
         [Fact]
@@ -841,7 +976,7 @@
             var count = 25 * 25 * 25 + 1;
             using (var builder = new PdfDocumentBuilder())
             {
-                for (var i = 0; i < count;i++)
+                for (var i = 0; i < count; i++)
                 {
                     builder.AddPage(PageSize.A4);
                 }
@@ -960,7 +1095,6 @@
                 }
             }
 
-
             (int, double) GetCounts(PdfDocument toCount)
             {
                 int letters = 0;
@@ -969,9 +1103,9 @@
                 {
                     foreach (var letter in page.Letters)
                     {
-                        
                         unchecked { letters += 1; }
-                        unchecked { 
+                        unchecked
+                        {
                             location += letter.Location.X;
                             location += letter.Location.Y;
                             location += letter.Font.Name.Length;
@@ -980,6 +1114,138 @@
                 }
 
                 return (letters, location);
+            }
+        }
+
+        [Fact]
+        public void CanUseCustomTokenWriter()
+        {
+            var docPath = IntegrationHelpers.GetDocumentPath("68-1990-01_A.pdf");
+            var tw = new TestTokenWriter();
+
+            using (var doc = PdfDocument.Open(docPath))
+            using (var ms = new MemoryStream())
+            using (var builder = new PdfDocumentBuilder(ms, tokenWriter: tw))
+            {
+                for (var i = 1; i <= doc.NumberOfPages; i++)
+                {
+                    builder.AddPage(doc, i);
+                }
+
+                builder.Build();
+            }
+
+            Assert.Equal(0, tw.Objects); // No objects in sample file
+            Assert.True(tw.Tokens > 1000); // Roughly 1065
+            Assert.True(tw.WroteCrossReferenceTable);
+        }
+
+        [Fact]
+        public void CanCopyInLineImage()
+        {
+            var docPath = IntegrationHelpers.GetDocumentPath("ssm2163.pdf");
+
+            using (var docOrig = PdfDocument.Open(docPath))
+            {
+
+                // Copy original document with inline images into pdf bytes for opening and checking.
+                PdfDocumentBuilder pdfBuilder = new PdfDocumentBuilder();
+                var numberOfPages = docOrig.NumberOfPages;
+                for (int pageNumber = 1; pageNumber <= numberOfPages; pageNumber++)
+                {
+                    var sourcePage = docOrig.GetPage(pageNumber);
+                    pdfBuilder.AddPage(sourcePage.Width, sourcePage.Height).CopyFrom(sourcePage);
+                }
+                var pdfBytes = pdfBuilder.Build();
+
+
+                using (var docCopy = PdfDocument.Open(pdfBytes))
+                {
+                    var pageNum = 7;
+                    var origPage = docOrig.GetPage(pageNum);
+                    var copyPage = docCopy.GetPage(pageNum);
+
+                    var opsOrig = origPage.Operations.Where(v => v.Operator == BeginInlineImageData.Symbol).Select(v => (BeginInlineImageData)v).ToArray();
+                    var opCopy = copyPage.Operations.Where(v => v.Operator == BeginInlineImageData.Symbol).Select(v => (BeginInlineImageData)v).ToArray();
+
+                    var dictOrig = opCopy.Select(v => v.Dictionary).ToArray();
+                    var dictCopy = opCopy.Select(v => v.Dictionary).ToArray();
+
+                    var exampleCopiedDictionary = dictCopy.FirstOrDefault();
+
+                    Assert.NotNull(exampleCopiedDictionary);
+                    Assert.True(exampleCopiedDictionary.Count > 0);
+                }
+            }
+        }
+
+        [Fact]
+        public void CanCreateDocumentWithOutline()
+        {
+            var builder = new PdfDocumentBuilder();
+            builder.Bookmarks = new Bookmarks(new BookmarkNode[]
+            {
+                new DocumentBookmarkNode(
+                    "1", 0, new ExplicitDestination(1, ExplicitDestinationType.XyzCoordinates, ExplicitDestinationCoordinates.Empty),
+                    new[]
+                    {
+                        new DocumentBookmarkNode("1.1", 0, new ExplicitDestination(2, ExplicitDestinationType.FitPage, ExplicitDestinationCoordinates.Empty), Array.Empty<BookmarkNode>()),
+                    }),
+                new DocumentBookmarkNode(
+                    "2", 0, new ExplicitDestination(3, ExplicitDestinationType.FitRectangle, ExplicitDestinationCoordinates.Empty),
+                    new[]
+                    {
+                        new DocumentBookmarkNode("2.1", 0, new ExplicitDestination(4, ExplicitDestinationType.FitBoundingBox, ExplicitDestinationCoordinates.Empty), Array.Empty<BookmarkNode>()),
+                        new DocumentBookmarkNode("2.2", 0, new ExplicitDestination(5, ExplicitDestinationType.FitBoundingBoxHorizontally, ExplicitDestinationCoordinates.Empty), Array.Empty<BookmarkNode>()),
+                        new DocumentBookmarkNode("2.3", 0, new ExplicitDestination(6, ExplicitDestinationType.FitBoundingBoxVertically, ExplicitDestinationCoordinates.Empty), Array.Empty<BookmarkNode>()),
+                        new DocumentBookmarkNode("2.4", 0, new ExplicitDestination(7, ExplicitDestinationType.FitHorizontally, ExplicitDestinationCoordinates.Empty), Array.Empty<BookmarkNode>()),
+                        new DocumentBookmarkNode("2.5", 0, new ExplicitDestination(8, ExplicitDestinationType.FitVertically, ExplicitDestinationCoordinates.Empty), Array.Empty<BookmarkNode>()),
+                    }),
+                new UriBookmarkNode("3", 0, "https://github.com", Array.Empty<BookmarkNode>()),
+            });
+
+            var font = builder.AddStandard14Font(Standard14Font.Helvetica);
+
+            foreach (var node in builder.Bookmarks.GetNodes())
+            {
+                builder.AddPage(PageSize.A4).AddText(node.Title, 12, new PdfPoint(25, 800), font);
+            }
+
+            var file = builder.Build();
+            WriteFile(nameof(CanCreateDocumentWithOutline), file);
+            using (var document = PdfDocument.Open(file))
+            {
+                Assert.True(document.TryGetBookmarks(out var bookmarks));
+
+                Assert.Equal(
+                    new[] { "1", "1.1", "2", "2.1", "2.2", "2.3", "2.4", "2.5", "3" },
+                    bookmarks.GetNodes().Select(node => node.Title));
+
+                Assert.Equal(
+                    new[] { 0, 1, 0, 1, 1, 1, 1, 1, 0 },
+                    bookmarks.GetNodes().Select(node => node.Level));
+
+                Assert.Equal(
+                    new[] { false, true, false, true, true, true, true, true, true },
+                    bookmarks.GetNodes().Select(node => node.IsLeaf));
+
+                Assert.Equal(
+                    new[] { "https://github.com" },
+                    bookmarks.GetNodes().OfType<UriBookmarkNode>().Select(node => node.Uri));
+
+                Assert.Equal(
+                    new[] 
+                    {
+                        ExplicitDestinationType.XyzCoordinates,
+                        ExplicitDestinationType.FitPage,
+                        ExplicitDestinationType.FitRectangle,
+                        ExplicitDestinationType.FitBoundingBox,
+                        ExplicitDestinationType.FitBoundingBoxHorizontally,
+                        ExplicitDestinationType.FitBoundingBoxVertically,
+                        ExplicitDestinationType.FitHorizontally,
+                        ExplicitDestinationType.FitVertically,
+                    },
+                    bookmarks.GetNodes().OfType<DocumentBookmarkNode>().Select(node => node.Destination.Type));
             }
         }
 
@@ -1000,6 +1266,32 @@
             {
                 // ignored.
             }
+        }
+    }
+
+    public class TestTokenWriter : ITokenWriter
+    {
+        public int Tokens { get; private set; }
+        public int Objects { get; private set; }
+        public bool WroteCrossReferenceTable { get; private set; }
+        public bool WritingPageContents { get; set; }
+
+        public void WriteToken(IToken token, Stream outputStream)
+        {
+            Tokens++;
+        }
+
+        public void WriteObject(long objectNumber, int generation, byte[] data, Stream outputStream)
+        {
+            Objects++;
+        }
+
+        public void WriteCrossReferenceTable(IReadOnlyDictionary<IndirectReference, long> objectOffsets,
+            IndirectReference catalogToken,
+            Stream outputStream,
+            IndirectReference? documentInformationReference)
+        {
+            WroteCrossReferenceTable = true;
         }
     }
 }

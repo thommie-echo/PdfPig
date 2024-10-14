@@ -2,6 +2,7 @@
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics.CodeAnalysis;
     using System.IO;
     using AcroForms;
     using Content;
@@ -10,12 +11,11 @@
     using Encryption;
     using Exceptions;
     using Filters;
-    using Logging;
     using Parser;
     using Tokenization.Scanner;
     using Tokens;
     using Outline;
-    using Util.JetBrains.Annotations;
+    using Outline.Destinations;
 
     /// <inheritdoc />
     /// <summary>
@@ -25,41 +25,25 @@
     {
         private bool isDisposed;
         private readonly Lazy<AcroForm> documentForm;
-        
-        [NotNull]
+
         private readonly HeaderVersion version;
-        
-        private readonly ILog log;
-
         private readonly IInputBytes inputBytes;
-
-        private readonly bool clipPaths;
-
-        [NotNull]
-        private readonly ParsingCachingProviders cachingProviders;
-
-        [CanBeNull]
-        private readonly EncryptionDictionary encryptionDictionary;
-
-        [NotNull]
+        private readonly EncryptionDictionary? encryptionDictionary;
         private readonly IPdfTokenScanner pdfScanner;
-
         private readonly ILookupFilterProvider filterProvider;
         private readonly BookmarksProvider bookmarksProvider;
-
-        [NotNull]
+        private readonly ParsingOptions parsingOptions;
         private readonly Pages pages;
+        private readonly NamedDestinations namedDestinations;
 
         /// <summary>
         /// The metadata associated with this document.
         /// </summary>
-        [NotNull]
         public DocumentInformation Information { get; }
 
         /// <summary>
-        /// Access to the underlying raw structure of the document. 
+        /// Access to the underlying raw structure of the document.
         /// </summary>
-        [NotNull]
         public Structure Structure { get; }
 
         /// <summary>
@@ -70,7 +54,7 @@
         /// <summary>
         /// The version number of the PDF specification which this file conforms to, for example 1.4.
         /// </summary>
-        public decimal Version => version.Version;
+        public double Version => version.Version;
 
         /// <summary>
         /// Get the number of pages in this document.
@@ -80,37 +64,36 @@
         /// <summary>
         /// Whether the document content is encrypted.
         /// </summary>
+        [MemberNotNullWhen(true, nameof(encryptionDictionary))]
         public bool IsEncrypted => encryptionDictionary != null;
 
-        internal PdfDocument(ILog log, 
+        internal PdfDocument(
             IInputBytes inputBytes,
-            HeaderVersion version, 
+            HeaderVersion version,
             CrossReferenceTable crossReferenceTable,
-            ParsingCachingProviders cachingProviders,
-            IPageFactory pageFactory,
             Catalog catalog,
-            DocumentInformation information, 
-            EncryptionDictionary encryptionDictionary,
+            DocumentInformation information,
+            EncryptionDictionary? encryptionDictionary,
             IPdfTokenScanner pdfScanner,
             ILookupFilterProvider filterProvider,
             AcroFormFactory acroFormFactory,
             BookmarksProvider bookmarksProvider,
-            bool clipPaths)
+            ParsingOptions parsingOptions)
         {
-            this.log = log;
             this.inputBytes = inputBytes;
             this.version = version ?? throw new ArgumentNullException(nameof(version));
-            this.cachingProviders = cachingProviders ?? throw new ArgumentNullException(nameof(cachingProviders));
             this.encryptionDictionary = encryptionDictionary;
             this.pdfScanner = pdfScanner ?? throw new ArgumentNullException(nameof(pdfScanner));
             this.filterProvider = filterProvider ?? throw new ArgumentNullException(nameof(filterProvider));
             this.bookmarksProvider = bookmarksProvider ?? throw new ArgumentNullException(nameof(bookmarksProvider));
-            this.clipPaths = clipPaths;
+            this.parsingOptions = parsingOptions;
+
             Information = information ?? throw new ArgumentNullException(nameof(information));
-            pages = new Pages(catalog, pageFactory, pdfScanner);
+            pages = catalog.Pages;
+            namedDestinations = catalog.NamedDestinations;
             Structure = new Structure(catalog, crossReferenceTable, pdfScanner);
             Advanced = new AdvancedPdfDocumentAccess(pdfScanner, filterProvider, catalog);
-            documentForm = new Lazy<AcroForm>(() => acroFormFactory.GetAcroForm(catalog));
+            documentForm = new Lazy<AcroForm>(() => acroFormFactory.GetAcroForm(catalog)!);
         }
 
         /// <summary>
@@ -119,15 +102,15 @@
         /// <param name="fileBytes">The bytes of the PDF file.</param>
         /// <param name="options">Optional parameters controlling parsing.</param>
         /// <returns>A <see cref="PdfDocument"/> providing access to the file contents.</returns>
-        public static PdfDocument Open(byte[] fileBytes, ParsingOptions options = null) => PdfDocumentFactory.Open(fileBytes, options);
- 
+        public static PdfDocument Open(byte[] fileBytes, ParsingOptions? options = null) => PdfDocumentFactory.Open(fileBytes, options);
+
         /// <summary>
         /// Opens a file and creates a <see cref="PdfDocument"/> for reading from the provided file path.
         /// </summary>
         /// <param name="filePath">The full path to the file location of the PDF file.</param>
         /// <param name="options">Optional parameters controlling parsing.</param>
         /// <returns>A <see cref="PdfDocument"/> providing access to the file contents.</returns>
-        public static PdfDocument Open(string filePath, ParsingOptions options = null) => PdfDocumentFactory.Open(filePath, options);
+        public static PdfDocument Open(string filePath, ParsingOptions? options = null) => PdfDocumentFactory.Open(filePath, options);
 
         /// <summary>
         /// Creates a <see cref="PdfDocument"/> for reading from the provided stream.
@@ -139,7 +122,27 @@
         /// </param>
         /// <param name="options">Optional parameters controlling parsing.</param>
         /// <returns>A <see cref="PdfDocument"/> providing access to the file contents.</returns>
-        public static PdfDocument Open(Stream stream, ParsingOptions options = null) => PdfDocumentFactory.Open(stream, options);
+        public static PdfDocument Open(Stream stream, ParsingOptions? options = null) => PdfDocumentFactory.Open(stream, options);
+
+        /// <summary>
+        /// Add a page factory.
+        /// </summary>
+        public void AddPageFactory<TPage>(IPageFactory<TPage> pageFactory)
+        {
+            pages.AddPageFactory(pageFactory);
+        }
+
+        /// <summary>
+        /// Add a page factory.
+        /// </summary>
+#if NET
+        public void AddPageFactory<TPage, [System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicConstructors)] TPageFactory>() where TPageFactory : IPageFactory<TPage>
+#else
+        public void AddPageFactory<TPage, TPageFactory>() where TPageFactory : IPageFactory<TPage>
+#endif
+        {
+            pages.AddPageFactory<TPage, TPageFactory>();
+        }
 
         /// <summary>
         /// Get the page with the specified page number (1 indexed).
@@ -153,17 +156,47 @@
                 throw new ObjectDisposedException("Cannot access page after the document is disposed.");
             }
 
-            log.Debug($"Accessing page {pageNumber}.");
+            parsingOptions.Logger.Debug($"Accessing page {pageNumber}.");
 
             try
             {
-                return pages.GetPage(pageNumber, clipPaths);
+                return pages.GetPage(pageNumber, namedDestinations, parsingOptions);
             }
             catch (Exception ex)
             {
                 if (IsEncrypted)
                 {
                     throw new PdfDocumentEncryptedException("Document was encrypted which may have caused error when retrieving page.", encryptionDictionary, ex);
+                }
+
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Get the page with the specified page number (1 indexed), using the specified page factory.
+        /// </summary>
+        /// <typeparam name="TPage"></typeparam>
+        /// <param name="pageNumber">The number of the page to return, this starts from 1.</param>
+        /// <returns>The page.</returns>
+        public TPage GetPage<TPage>(int pageNumber)
+        {
+            if (isDisposed)
+            {
+                throw new ObjectDisposedException("Cannot access page after the document is disposed.");
+            }
+
+            parsingOptions.Logger.Debug($"Accessing page {pageNumber}.");
+
+            try
+            {
+                return pages.GetPage<TPage>(pageNumber, namedDestinations, parsingOptions);
+            }
+            catch (Exception ex)
+            {
+                if (IsEncrypted)
+                {
+                    throw new PdfDocumentEncryptedException("Document was encrypted which may have caused error when retrieving page.", encryptionDictionary!, ex);
                 }
 
                 throw;
@@ -182,13 +215,24 @@
         }
 
         /// <summary>
+        /// Gets all pages in this document in order, using the specified page factory.
+        /// </summary>
+        public IEnumerable<TPage> GetPages<TPage>()
+        {
+            for (var i = 0; i < NumberOfPages; i++)
+            {
+                yield return GetPage<TPage>(i + 1);
+            }
+        }
+
+        /// <summary>
         /// Get the document level metadata if present.
         /// The metadata is XML in the (Extensible Metadata Platform) XMP format.
         /// </summary>
         /// <remarks>This will throw a <see cref="ObjectDisposedException"/> if called on a disposed <see cref="PdfDocument"/>.</remarks>
         /// <param name="metadata">The metadata stream if it exists.</param>
         /// <returns><see langword="true"/> if the metadata is present, <see langword="false"/> otherwise.</returns>
-        public bool TryGetXmpMetadata(out XmpMetadata metadata)
+        public bool TryGetXmpMetadata([NotNullWhen(true)] out XmpMetadata? metadata)
         {
             if (isDisposed)
             {
@@ -197,7 +241,7 @@
 
             metadata = null;
 
-            if (!Structure.Catalog.CatalogDictionary.TryGet(NameToken.Metadata, pdfScanner, out StreamToken xmpStreamToken))
+            if (!Structure.Catalog.CatalogDictionary.TryGet(NameToken.Metadata, pdfScanner, out StreamToken? xmpStreamToken))
             {
                 return false;
             }
@@ -211,7 +255,7 @@
         /// Gets the bookmarks if this document contains some.
         /// </summary>
         /// <remarks>This will throw a <see cref="ObjectDisposedException"/> if called on a disposed <see cref="PdfDocument"/>.</remarks>
-        public bool TryGetBookmarks(out Bookmarks bookmarks)
+        public bool TryGetBookmarks([NotNullWhen(true)] out Bookmarks? bookmarks)
         {
             if (isDisposed)
             {
@@ -219,12 +263,8 @@
             }
 
             bookmarks = bookmarksProvider.GetBookmarks(Structure.Catalog);
-            if (bookmarks != null)
-            {
-                return true;
-            }
 
-            return false;
+            return bookmarks != null;
         }
 
         /// <summary>
@@ -243,7 +283,7 @@
 
             return form != null;
         }
-        
+
         /// <inheritdoc />
         /// <summary>
         /// Dispose the <see cref="T:UglyToad.PdfPig.PdfDocument" /> and close any unmanaged resources.
@@ -255,10 +295,11 @@
                 Advanced.Dispose();
                 pdfScanner.Dispose();
                 inputBytes.Dispose();
+                pages.Dispose();
             }
             catch (Exception ex)
             {
-                log.Error("Failed disposing the PdfDocument due to an error.", ex);
+                parsingOptions.Logger.Error("Failed disposing the PdfDocument due to an error.", ex);
             }
             finally
             {

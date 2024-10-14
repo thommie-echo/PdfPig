@@ -10,9 +10,9 @@
     {
         private readonly List<Operand> operands = new List<Operand>();
 
-        public abstract TResult Read(CompactFontFormatData data, IReadOnlyList<string> stringIndex);
+        public abstract TResult Read(CompactFontFormatData data, ReadOnlySpan<string> stringIndex);
 
-        protected TBuilder ReadDictionary(TBuilder builder, CompactFontFormatData data, IReadOnlyList<string> stringIndex)
+        protected TBuilder ReadDictionary(TBuilder builder, CompactFontFormatData data, ReadOnlySpan<string> stringIndex)
         {
             while (data.CanRead())
             {
@@ -91,7 +91,7 @@
             return builder;
         }
 
-        private static decimal ReadRealNumber(CompactFontFormatData data)
+        private static double ReadRealNumber(CompactFontFormatData data)
         {
             var sb = new StringBuilder();
             var done = false;
@@ -124,7 +124,7 @@
                             exponentMissing = false;
                             break;
                         case 0xa:
-                            sb.Append(".");
+                            sb.Append('.');
                             break;
                         case 0xb:
                             if (hasExponent)
@@ -132,7 +132,7 @@
                                 // avoid duplicates
                                 break;
                             }
-                            sb.Append("E");
+                            sb.Append('E');
                             exponentMissing = true;
                             hasExponent = true;
                             break;
@@ -149,7 +149,7 @@
                         case 0xd:
                             break;
                         case 0xe:
-                            sb.Append("-");
+                            sb.Append('-');
                             break;
                         case 0xf:
                             done = true;
@@ -165,20 +165,20 @@
                 // the exponent is missing, just append "0" to avoid an exception
                 // not sure if 0 is the correct value, but it seems to fit
                 // see PDFBOX-1522
-                sb.Append("0");
+                sb.Append('0');
             }
 
             if (sb.Length == 0)
             {
-                return 0m;
+                return 0.0;
             }
 
-            return hasExponent ? decimal.Parse(sb.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture) : decimal.Parse(sb.ToString(), CultureInfo.InvariantCulture);
+            return hasExponent ? double.Parse(sb.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture) : double.Parse(sb.ToString(), CultureInfo.InvariantCulture);
         }
 
-        protected abstract void ApplyOperation(TBuilder builder, List<Operand> operands, OperandKey operandKey, IReadOnlyList<string> stringIndex);
+        protected abstract void ApplyOperation(TBuilder builder, List<Operand> operands, OperandKey operandKey, ReadOnlySpan<string> stringIndex);
 
-        protected static string GetString(List<Operand> operands, IReadOnlyList<string> stringIndex)
+        protected static string GetString(List<Operand> operands, ReadOnlySpan<string> stringIndex)
         {
             if (operands.Count == 0)
             {
@@ -187,7 +187,7 @@
 
             if (!operands[0].Int.HasValue)
             {
-                throw new InvalidOperationException($"The first operand for reading a string was not an integer. Got: {operands[0].Decimal}");
+                throw new InvalidOperationException($"The first operand for reading a string was not an integer. Got: {operands[0].Double}");
             }
 
             var index = operands[0].Int.Value;
@@ -198,7 +198,7 @@
             }
 
             var stringIndexIndex = index - 391;
-            if (stringIndexIndex >= 0 && stringIndexIndex < stringIndex.Count)
+            if (stringIndexIndex >= 0 && stringIndexIndex < stringIndex.Length)
             {
                 return stringIndex[stringIndexIndex];
             }
@@ -213,17 +213,17 @@
                 return new PdfRectangle();
             }
 
-            return new PdfRectangle((double)operands[0].Decimal, (double)operands[1].Decimal,
-                (double)operands[2].Decimal, (double)operands[3].Decimal);
+            return new PdfRectangle(operands[0].Double, operands[1].Double,
+                operands[2].Double, operands[3].Double);
         }
 
-        protected static decimal[] ToArray(List<Operand> operands)
+        protected static double[] ToArray(List<Operand> operands)
         {
-            var result = new decimal[operands.Count];
+            var result = new double[operands.Count];
 
             for (int i = 0; i < result.Length; i++)
             {
-                result[i] = operands[i].Decimal;
+                result[i] = operands[i].Double;
             }
 
             return result;
@@ -255,12 +255,12 @@
                 return results;
             }
 
-            results[0] = (int)operands[0].Decimal;
+            results[0] = (int)operands[0].Double;
 
             for (var i = 1; i < operands.Count; i++)
             {
                 var previous = results[i - 1];
-                var current = operands[i].Decimal;
+                var current = operands[i].Double;
 
                 results[i] = (int)(previous + current);
             }
@@ -268,21 +268,21 @@
             return results;
         }
 
-        protected static decimal[] ReadDeltaToArray(List<Operand> operands)
+        protected static double[] ReadDeltaToArray(List<Operand> operands)
         {
-            var results = new decimal[operands.Count];
+            var results = new double[operands.Count];
 
             if (operands.Count == 0)
             {
                 return results;
             }
 
-            results[0] = operands[0].Decimal;
+            results[0] = operands[0].Double;
 
             for (var i = 1; i < operands.Count; i++)
             {
                 var previous = results[i - 1];
-                var current = operands[i].Decimal;
+                var current = operands[i].Double;
 
                 results[i] = previous + current;
             }
@@ -290,32 +290,32 @@
             return results;
         }
 
-        protected struct Operand
+        protected readonly struct Operand
         {
             public int? Int { get; }
 
-            public decimal Decimal { get; }
+            public double Double { get; }
 
             public Operand(int integer)
             {
                 Int = integer;
-                Decimal = integer;
+                Double = integer;
             }
 
-            public Operand(decimal d)
+            public Operand(double d)
             {
                 Int = null;
-                Decimal = d;
+                Double = d;
             }
         }
 
-        protected struct OperandKey
+        protected readonly struct OperandKey
         {
             public byte Byte0 { get; }
 
             public byte? Byte1 { get; }
 
-            public OperandKey(Byte byte0)
+            public OperandKey(byte byte0)
             {
                 Byte0 = byte0;
                 Byte1 = null;

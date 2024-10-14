@@ -6,7 +6,7 @@
 
     internal class CompactFontFormatTopLevelDictionaryReader : CompactFontFormatDictionaryReader<CompactFontFormatTopLevelDictionary, CompactFontFormatTopLevelDictionary>
     {
-        public override CompactFontFormatTopLevelDictionary Read(CompactFontFormatData data, IReadOnlyList<string> stringIndex)
+        public override CompactFontFormatTopLevelDictionary Read(CompactFontFormatData data, ReadOnlySpan<string> stringIndex)
         {
             var dictionary = new CompactFontFormatTopLevelDictionary();
 
@@ -15,7 +15,7 @@
             return dictionary;
         }
 
-        protected override void ApplyOperation(CompactFontFormatTopLevelDictionary dictionary, List<Operand> operands, OperandKey key, IReadOnlyList<string> stringIndex)
+        protected override void ApplyOperation(CompactFontFormatTopLevelDictionary dictionary, List<Operand> operands, OperandKey key, ReadOnlySpan<string> stringIndex)
         {
             switch (key.Byte0)
             {
@@ -50,19 +50,19 @@
                                 dictionary.Copyright = GetString(operands, stringIndex);
                                 break;
                             case 1:
-                                dictionary.IsFixedPitch = operands[0].Decimal == 1;
+                                dictionary.IsFixedPitch = operands[0].Double == 1;
                                 break;
                             case 2:
-                                dictionary.ItalicAngle = operands[0].Decimal;
+                                dictionary.ItalicAngle = operands[0].Double;
                                 break;
                             case 3:
-                                dictionary.UnderlinePosition = operands[0].Decimal;
+                                dictionary.UnderlinePosition = operands[0].Double;
                                 break;
                             case 4:
-                                dictionary.UnderlineThickness = operands[0].Decimal;
+                                dictionary.UnderlineThickness = operands[0].Double;
                                 break;
                             case 5:
-                                dictionary.PaintType = operands[0].Decimal;
+                                dictionary.PaintType = operands[0].Double;
                                 break;
                             case 6:
                                 dictionary.CharStringType = (CompactFontFormatCharStringType)GetIntOrDefault(operands, 2);
@@ -81,12 +81,12 @@
                                     }
                                     else
                                     {
-                                        throw new InvalidOperationException($"Expected four values for the font matrix, instead got: {array}.");
+                                        throw new InvalidOperationException($"Expected four values for the font matrix, instead got: {array.Length}.");
                                     }
                                 }
                                 break;
                             case 8:
-                                dictionary.StrokeWidth = operands[0].Decimal;
+                                dictionary.StrokeWidth = operands[0].Double;
                                 break;
                             case 20:
                                 dictionary.SyntheticBaseFontIndex = GetIntOrDefault(operands);
@@ -143,7 +143,7 @@
                     }
                     break;
                 case 13:
-                    dictionary.UniqueId = operands.Count > 0 ? operands[0].Decimal : 0;
+                    dictionary.UniqueId = operands.Count > 0 ? operands[0].Double : 0;
                     break;
                 case 14:
                     dictionary.Xuid = ToArray(operands);

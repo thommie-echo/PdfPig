@@ -13,9 +13,9 @@
     /// <summary>
     /// Exports a page as an SVG.
     /// </summary>
-    public class SvgTextExporter : ITextExporter
+    public sealed class SvgTextExporter : ITextExporter
     {
-        private const int Rounding = 4;
+        private readonly Func<string, string> invalidCharacterHandler;
 
         private static readonly Dictionary<string, string> Fonts = new Dictionary<string, string>()
         {
@@ -23,28 +23,62 @@
         };
 
         /// <summary>
+        /// Used to round numbers.
+        /// </summary>
+        public int Rounding { get; } = 4;
+
+        /// <summary>
+        /// <inheritdoc/>
+        /// Not in use.
+        /// </summary>
+        public InvalidCharStrategy InvalidCharStrategy { get; }
+
+        /// <summary>
+        /// Svg text exporter.
+        /// </summary>
+        /// <param name="invalidCharacterHandler">How to handle invalid characters.</param>
+        public SvgTextExporter(Func<string, string> invalidCharacterHandler)
+            : this(InvalidCharStrategy.Custom, invalidCharacterHandler)
+        { }
+
+        /// <summary>
+        /// Svg text exporter.
+        /// </summary>
+        /// <param name="invalidCharacterStrategy">How to handle invalid characters.</param>
+        public SvgTextExporter(InvalidCharStrategy invalidCharacterStrategy = InvalidCharStrategy.DoNotCheck)
+            : this(invalidCharacterStrategy, null)
+        { }
+
+        private SvgTextExporter(InvalidCharStrategy invalidCharacterStrategy, Func<string, string> invalidCharacterHandler)
+        {
+            InvalidCharStrategy = invalidCharacterStrategy;
+
+            if (invalidCharacterHandler is null)
+            {
+                this.invalidCharacterHandler = TextExporterHelper.GetXmlInvalidCharHandler(InvalidCharStrategy);
+            }
+            else
+            {
+                this.invalidCharacterHandler = invalidCharacterHandler;
+            }
+        }
+        /// <summary>
         /// Get the page contents as an SVG.
         /// </summary>
         public string Get(Page page)
         {
-            var builder = new StringBuilder($"<svg width='{page.Width}' height='{page.Height}'><g transform=\"scale(1, 1) translate(0, 0)\">");
+            var builder = new StringBuilder($"<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width='{Math.Round(page.Width, Rounding)}' height='{Math.Round(page.Height, Rounding)}'>\n<g transform=\"scale(1, 1) translate(0, 0)\">\n");
 
-            var paths = page.ExperimentalAccess.Paths;
-            foreach (var path in paths)
+            foreach (var path in page.ExperimentalAccess.Paths)
             {
-                if (path.IsClipping)
+                if (!path.IsClipping)
                 {
-                    //var svg = PathToSvg(path, page.Height);
-                    //svg = svg.Replace("stroke='black'", "stroke='yellow'");
-                    //builder.Append(svg);
-                }
-                else
-                {
-                    builder.Append(PathToSvg(path, page.Height));
+                    builder.AppendLine(PathToSvg(path, page.Height));
                 }
             }
 
             var doc = new XmlDocument();
+
             foreach (var letter in page.Letters)
             {
                 builder.Append(LetterToSvg(letter, page.Height, doc));
@@ -53,8 +87,8 @@
             builder.Append("</g></svg>");
             return builder.ToString();
         }
-        
-        private static string LetterToSvg(Letter l, double height, XmlDocument doc)
+
+        private string LetterToSvg(Letter l, double height, XmlDocument doc)
         {
             string fontFamily = GetFontFamily(l.FontName, out string style, out string weight);
             string rotation = "";
@@ -69,7 +103,7 @@
             var x = Math.Round(l.StartBaseLine.X, Rounding);
             var y = Math.Round(height - l.StartBaseLine.Y, Rounding);
 
-            return $"<text x='{x}' y='{y}'{rotation} font-family='{fontFamily}' font-style='{style}' font-weight='{weight}' {fontSize} fill='{ColorToSvg(l.Color)}'>{safeValue}</text>" 
+            return $"<text x='{x}' y='{y}'{rotation} font-family='{fontFamily}' font-style='{style}' font-weight='{weight}' {fontSize} fill='{ColorToSvg(l.Color)}'>{safeValue}</text>"
                    + Environment.NewLine;
         }
 
@@ -123,22 +157,30 @@
                 }
             }
 
-            if (Fonts.ContainsKey(fontName)) fontName = Fonts[fontName];
+            if (Fonts.ContainsKey(fontName))
+            {
+                fontName = Fonts[fontName];
+            }
+
             return fontName;
         }
 
-        private static string XmlEscape(Letter letter, XmlDocument doc)
+        private string XmlEscape(Letter letter, XmlDocument doc)
         {
             XmlNode node = doc.CreateElement("root");
-            node.InnerText = letter.Value;
+            node.InnerText = invalidCharacterHandler(letter.Value);
             return node.InnerXml;
         }
 
         private static string ColorToSvg(IColor color)
         {
-            if (color == null) return "";
+            if (color == null)
+            {
+                return string.Empty;
+            }
+
             var (r, g, b) = color.ToRGBValues();
-            return $"rgb({Math.Ceiling(r * 255)},{Math.Ceiling(g * 255)},{Math.Ceiling(b * 255)})";
+            return $"rgb({Convert.ToByte(r * 255)},{Convert.ToByte(g * 255)},{Convert.ToByte(b * 255)})";
         }
 
         private static string PathToSvg(PdfPath p, double height)
@@ -206,12 +248,11 @@
             }
 
             string fillColor = " fill='none'";
-            string fillRule = "";
+            const string fillRule = ""; // For further dev
 
             if (p.IsFilled)
             {
                 fillColor = $" fill='{ColorToSvg(p.FillColor)}'";
-                //if (p.FillingRule == FillingRule.EvenOdd) fillRule = " fill-rule='evenodd'";
             }
 
             var path = $"<path d='{glyph}'{fillColor}{fillRule}{strokeColor}{strokeWidth}{dashArray}{capStyle}{jointStyle}></path>";

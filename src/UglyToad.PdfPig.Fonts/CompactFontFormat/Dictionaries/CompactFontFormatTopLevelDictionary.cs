@@ -2,7 +2,7 @@
 {
     using Core;
 
-    internal class CompactFontFormatTopLevelDictionary
+    internal sealed class CompactFontFormatTopLevelDictionary
     {
         public const int UnsetOffset = -1;
 
@@ -20,25 +20,25 @@
 
         public bool IsFixedPitch { get; set; }
 
-        public decimal ItalicAngle { get; set; }
+        public double ItalicAngle { get; set; }
 
-        public decimal UnderlinePosition { get; set; } = -100;
+        public double UnderlinePosition { get; set; } = -100;
 
-        public decimal UnderlineThickness { get; set; } = 50;
+        public double UnderlineThickness { get; set; } = 50;
 
-        public decimal PaintType { get; set; }
+        public double PaintType { get; set; }
 
         public CompactFontFormatCharStringType CharStringType { get; set; } = CompactFontFormatCharStringType.Type2;
 
-        public TransformationMatrix FontMatrix { get; set; } = TransformationMatrix.FromValues(0.001, 0, 0, 0.001, 0, 0);
+        public TransformationMatrix? FontMatrix { get; set; }
 
-        public decimal StrokeWidth { get; set; }
+        public double StrokeWidth { get; set; }
 
-        public decimal UniqueId { get; set; }
+        public double UniqueId { get; set; }
 
         public PdfRectangle FontBoundingBox { get; set; } = new PdfRectangle(0, 0, 0, 0);
 
-        public decimal[] Xuid { get; set; }
+        public double[] Xuid { get; set; }
 
         public int CharSetOffset { get; set; } = UnsetOffset;
 
@@ -54,13 +54,13 @@
 
         public string BaseFontName { get; set; }
 
-        public decimal[] BaseFontBlend { get; set; }
+        public double[] BaseFontBlend { get; set; }
 
         public bool IsCidFont { get; set; }
 
         public CidFontOperators CidFontOperators { get; set; } = new CidFontOperators();
 
-        public struct SizeAndOffset
+        public readonly struct SizeAndOffset
         {
             public int Size { get; }
 
@@ -79,7 +79,7 @@
         }
     }
 
-    internal class CidFontOperators
+    internal sealed class CidFontOperators
     {
         public RegistryOrderingSupplement Ros { get; set; }
 
@@ -91,7 +91,7 @@
 
         public int Count { get; set; } = 8720;
 
-        public decimal UidBase { get; set; }
+        public double UidBase { get; set; }
 
         public int FontDictionaryArray { get; set; }
 
@@ -100,19 +100,19 @@
         public string FontName { get; set; }
     }
 
-    internal class RegistryOrderingSupplement
+    internal sealed class RegistryOrderingSupplement
     {
         public string Registry { get; set; }
 
         public string Ordering { get; set; }
 
-        public decimal Supplement { get; set; }
+        public double Supplement { get; set; }
     }
 
     /// <summary>
     /// Defines the format of the CharString data contained within a Compact Font Format font.
     /// </summary>
-    internal enum CompactFontFormatCharStringType
+    internal enum CompactFontFormatCharStringType : byte
     {
         /// <summary>
         /// The Type 1 CharString format as defined by the Adobe Type 1 Font Format.

@@ -3,7 +3,6 @@
     using System.IO;
     using TextPositioning;
     using TextState;
-    using Util.JetBrains.Annotations;
 
     /// <inheritdoc />
     /// <summary>
@@ -22,24 +21,22 @@
         /// <summary>
         /// The word spacing.
         /// </summary>
-        public decimal WordSpacing { get; }
+        public double WordSpacing { get; }
 
         /// <summary>
         /// The character spacing.
         /// </summary>
-        public decimal CharacterSpacing { get; }
+        public double CharacterSpacing { get; }
 
         /// <summary>
         /// The bytes of the text.
         /// </summary>
-        [CanBeNull]
-        public byte[] Bytes { get; }
+        public byte[]? Bytes { get; }
 
         /// <summary>
         /// The text to show.
         /// </summary>
-        [CanBeNull]
-        public string Text { get; }
+        public string? Text { get; }
 
         /// <summary>
         /// Create a new <see cref="MoveToNextLineShowTextWithSpacing"/>.
@@ -47,7 +44,7 @@
         /// <param name="wordSpacing">The word spacing.</param>
         /// <param name="characterSpacing">The character spacing.</param>
         /// <param name="text">The text to show.</param>
-        public MoveToNextLineShowTextWithSpacing(decimal wordSpacing, decimal characterSpacing, string text)
+        public MoveToNextLineShowTextWithSpacing(double wordSpacing, double characterSpacing, string text)
         {
             WordSpacing = wordSpacing;
             CharacterSpacing = characterSpacing;
@@ -60,7 +57,7 @@
         /// <param name="wordSpacing">The word spacing.</param>
         /// <param name="characterSpacing">The character spacing.</param>
         /// <param name="hexBytes">The bytes of the text to show.</param>
-        public MoveToNextLineShowTextWithSpacing(decimal wordSpacing, decimal characterSpacing, byte[] hexBytes)
+        public MoveToNextLineShowTextWithSpacing(double wordSpacing, double characterSpacing, byte[] hexBytes)
         {
             WordSpacing = wordSpacing;
             CharacterSpacing = characterSpacing;
@@ -73,7 +70,7 @@
             var setWordSpacing = new SetWordSpacing(WordSpacing);
             var setCharacterSpacing = new SetCharacterSpacing(CharacterSpacing);
             var moveToNextLine = MoveToNextLine.Value;
-            var showText = Text != null ? new ShowText(Text) : new ShowText(Bytes);
+            var showText = Text != null ? new ShowText(Text) : new ShowText(Bytes!);
 
             setWordSpacing.Run(operationContext);
             setCharacterSpacing.Run(operationContext);
@@ -84,9 +81,9 @@
         /// <inheritdoc />
         public void Write(Stream stream)
         {
-            stream.WriteDecimal(WordSpacing);
+            stream.WriteDouble(WordSpacing);
             stream.WriteWhiteSpace();
-            stream.WriteDecimal(CharacterSpacing);
+            stream.WriteDouble(CharacterSpacing);
             stream.WriteWhiteSpace();
 
             if (Bytes != null)

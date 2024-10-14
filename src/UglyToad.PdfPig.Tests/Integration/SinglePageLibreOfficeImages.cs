@@ -1,8 +1,5 @@
 ﻿namespace UglyToad.PdfPig.Tests.Integration
 {
-    using System.Linq;
-    using Xunit;
-
     public class SinglePageLibreOfficeImages
     {
         private static string GetFilePath() => IntegrationHelpers.GetDocumentPath(@"Single Page Images - from libre office.pdf");
@@ -23,7 +20,7 @@
         [Fact]
         public void ImagesHaveCorrectDimensionsAndLocations()
         {
-            var doubleComparer = new DoubleComparer(1);
+            var doubleComparer = new DoubleComparer(0.1);
 
             using (var document = PdfDocument.Open(GetFilePath(), ParsingOptions.LenientParsingOff))
             {
@@ -73,13 +70,13 @@
                 var page = document.GetPage(1);
                 foreach (var image in page.GetImages())
                 {
-                    if (image.TryGetBytes(out var bytes))
+                    if (image.TryGetBytesAsMemory(out var bytes))
                     {
-                        Assert.NotNull(bytes);
+                        Assert.False(bytes.IsEmpty);
                     }
                     else
                     {
-                        Assert.NotNull(image.RawBytes);
+                        Assert.False(image.RawMemory.IsEmpty);
                     }
                 }
             }

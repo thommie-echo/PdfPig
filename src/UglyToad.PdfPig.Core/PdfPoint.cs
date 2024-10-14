@@ -1,22 +1,23 @@
 ﻿namespace UglyToad.PdfPig.Core
 {
+    using System;
     using System.Diagnostics;
     using System.Globalization;
 
     /// <summary>
-    /// A point in a PDF file. 
+    /// A point in a PDF file.
     /// </summary>
     /// <remarks>
     /// PDF coordinates are defined with the origin at the lower left (0, 0).
     /// The Y-axis extends vertically upwards and the X-axis horizontally to the right.
     /// Unless otherwise specified on a per-page basis, units in PDF space are equivalent to a typographic point (1/72 inch).
     /// </remarks>
-    public struct PdfPoint
+    public readonly struct PdfPoint
     {
         /// <summary>
         /// The origin of the coordinates system.
         /// </summary>
-        public static PdfPoint Origin { get; } = new PdfPoint(0m, 0m);
+        public static PdfPoint Origin { get; } = new PdfPoint(0.0, 0.0);
 
         /// <summary>
         /// The X coordinate for this point. (Horizontal axis).
@@ -27,16 +28,6 @@
         /// The Y coordinate of this point. (Vertical axis).
         /// </summary>
         public double Y { get; }
-
-        /// <summary>
-        /// Create a new <see cref="PdfPoint"/> at this position.
-        /// </summary>
-        [DebuggerStepThrough]
-        public PdfPoint(decimal x, decimal y)
-        {
-            X = (double)x;
-            Y = (double)y;
-        }
 
         /// <summary>
         /// Create a new <see cref="PdfPoint"/> at this position.
@@ -67,7 +58,7 @@
         {
             return new PdfPoint(X + dx, Y);
         }
-        
+
         /// <summary>
         /// Creates a new <see cref="PdfPoint"/> which is the current point moved in the y direction relative to its current position by a value.
         /// </summary>
@@ -107,7 +98,7 @@
         /// </summary>
         public override int GetHashCode()
         {
-            return (X, Y).GetHashCode();
+            return HashCode.Combine(X, Y);
         }
 
         /// <inheritdoc />

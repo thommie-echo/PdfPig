@@ -54,7 +54,7 @@
         /// <summary>
         /// The name of the font.
         /// </summary>
-        public string FontName => Font?.Name;
+        public string? FontName => Font?.Name;
 
         /// <summary>
         /// Details about the font for this letter.
@@ -62,9 +62,30 @@
         public FontDetails Font { get; }
 
         /// <summary>
-        /// The color of the letter.
+        /// Text rendering mode that indicates whether we should draw this letter's strokes,
+        /// fill, both, neither (in case of hidden text), etc.
+        /// If it calls for stroking the <see cref="StrokeColor" /> is used.
+        /// If it calls for filling, the <see cref="FillColor"/> is used.
+        /// In modes that perform both filling and stroking, the effect is as if each glyph outline were filled and then stroked in separate operations.
+        /// </summary>
+        public TextRenderingMode RenderingMode { get; }
+
+        /// <summary>
+        /// The primary color of the letter, which is either the <see cref="StrokeColor"/> in case
+        /// <see cref="RenderingMode"/> is <see cref="TextRenderingMode.Stroke"/>, or otherwise
+        /// it is the <see cref="FillColor"/>.
         /// </summary>
         public IColor Color { get; }
+
+        /// <summary>
+        /// Stroking color
+        /// </summary>
+        public IColor StrokeColor { get; }
+
+        /// <summary>
+        /// Non-stroking (fill) color
+        /// </summary>
+        public IColor FillColor { get; }
 
         /// <summary>
         /// The size of the font in points.
@@ -85,7 +106,9 @@
             double width,
             double fontSize,
             FontDetails font,
-            IColor color,
+            TextRenderingMode renderingMode,
+            IColor strokeColor,
+            IColor fillColor,
             double pointSize,
             int textSequence)
         {
@@ -96,7 +119,17 @@
             Width = width;
             FontSize = fontSize;
             Font = font;
-            Color = color ?? GrayColor.Black;
+            RenderingMode = renderingMode;
+            if (renderingMode == TextRenderingMode.Stroke)
+            {
+                Color = StrokeColor = strokeColor ?? GrayColor.Black;
+                FillColor = fillColor;
+            }
+            else
+            {
+                Color = FillColor = fillColor ?? GrayColor.Black;
+                StrokeColor = strokeColor;
+            }
             PointSize = pointSize;
             TextSequence = textSequence;
             TextOrientation = GetTextOrientation();
@@ -104,8 +137,14 @@
 
         private TextOrientation GetTextOrientation()
         {
-            if (System.Math.Abs(StartBaseLine.Y - EndBaseLine.Y) < 10e-5)
+            if (Math.Abs(StartBaseLine.Y - EndBaseLine.Y) < 10e-5)
             {
+                if (Math.Abs(StartBaseLine.X - EndBaseLine.X) < 10e-5)
+                {
+                    // Start and End point are the same
+                    return GetTextOrientationRot();
+                }
+
                 if (StartBaseLine.X > EndBaseLine.X)
                 {
                     return TextOrientation.Rotate180;
@@ -114,8 +153,14 @@
                 return TextOrientation.Horizontal;
             }
 
-            if (System.Math.Abs(StartBaseLine.X - EndBaseLine.X) < 10e-5)
+            if (Math.Abs(StartBaseLine.X - EndBaseLine.X) < 10e-5)
             {
+                if (Math.Abs(StartBaseLine.Y - EndBaseLine.Y) < 10e-5)
+                {
+                    // Start and End point are the same
+                    return GetTextOrientationRot();
+                }
+
                 if (StartBaseLine.Y > EndBaseLine.Y)
                 {
                     return TextOrientation.Rotate90;
@@ -125,6 +170,34 @@
             }
 
             return TextOrientation.Other;
+        }
+
+        private TextOrientation GetTextOrientationRot()
+        {
+            double rotation = GlyphRectangle.Rotation;
+            if (Math.Abs(rotation % 90) >= 10e-5)
+            {
+                return TextOrientation.Other;
+            }
+
+            int rotationInt = (int)Math.Round(rotation, MidpointRounding.AwayFromZero);
+            switch (rotationInt)
+            {
+                case 0:
+                    return TextOrientation.Horizontal;
+
+                case -90:
+                    return TextOrientation.Rotate90;
+
+                case 180:
+                case -180:
+                    return TextOrientation.Rotate180;
+
+                case 90:
+                    return TextOrientation.Rotate270;
+            }
+
+            throw new Exception($"Could not find TextOrientation for rotation '{rotation}'.");
         }
 
         /// <summary>

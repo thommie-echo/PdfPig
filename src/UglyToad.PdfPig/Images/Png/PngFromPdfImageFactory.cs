@@ -1,50 +1,62 @@
 ﻿namespace UglyToad.PdfPig.Images.Png
 {
+    using System.Diagnostics.CodeAnalysis;
     using Content;
     using Graphics.Colors;
+    using UglyToad.PdfPig.Core;
 
     internal static class PngFromPdfImageFactory
     {
-        public static bool TryGenerate(IPdfImage image, out byte[] bytes)
+        public static bool TryGenerate(IPdfImage image, [NotNullWhen(true)] out byte[]? bytes)
         {
             bytes = null;
 
-            var hasValidDetails = image.ColorSpaceDetails != null &&
-                                  !(image.ColorSpaceDetails is UnsupportedColorSpaceDetails);
-            var actualColorSpace = hasValidDetails ? image.ColorSpaceDetails.BaseType : image.ColorSpace;
+            var hasValidDetails = image.ColorSpaceDetails != null && !(image.ColorSpaceDetails is UnsupportedColorSpaceDetails);
 
-            var isColorSpaceSupported =
-                actualColorSpace == ColorSpace.DeviceGray || actualColorSpace == ColorSpace.DeviceRGB
-                || actualColorSpace == ColorSpace.DeviceCMYK;
+            var isColorSpaceSupported = hasValidDetails && image.ColorSpaceDetails!.BaseType != ColorSpace.Pattern;
 
-            if (!isColorSpaceSupported || !image.TryGetBytes(out var bytesPure))
+            if (!isColorSpaceSupported || !image.TryGetBytesAsMemory(out var imageMemory))
             {
                 return false;
             }
 
+            var bytesPure = imageMemory.Span;
+
             try
             {
-                bytesPure = ColorSpaceDetailsByteConverter.Convert(image.ColorSpaceDetails, bytesPure,
+                bytesPure = ColorSpaceDetailsByteConverter.Convert(image.ColorSpaceDetails!, bytesPure,
                     image.BitsPerComponent, image.WidthInSamples, image.HeightInSamples);
 
-                var numberOfComponents = actualColorSpace == ColorSpace.DeviceCMYK ? 4 : actualColorSpace == ColorSpace.DeviceRGB ? 3 : 1;
+                var numberOfComponents = image.ColorSpaceDetails!.BaseNumberOfColorComponents;
+
                 var is3Byte = numberOfComponents == 3;
 
                 var builder = PngBuilder.Create(image.WidthInSamples, image.HeightInSamples, false);
 
-                var isCorrectlySized = bytesPure.Count == (image.WidthInSamples * image.HeightInSamples * numberOfComponents);
+                var requiredSize = (image.WidthInSamples * image.HeightInSamples * numberOfComponents);
+
+                var actualSize = bytesPure.Length;
+                var isCorrectlySized = bytesPure.Length == requiredSize ||
+                    // Spec, p. 37: "...error if the stream contains too much data, with the exception that
+                    // there may be an extra end-of-line marker..."
+                    (actualSize == requiredSize + 1 && bytesPure[actualSize - 1] == ReadHelper.AsciiLineFeed) ||
+                    (actualSize == requiredSize + 1 && bytesPure[actualSize - 1] == ReadHelper.AsciiCarriageReturn) ||
+                    // The combination of a CARRIAGE RETURN followed immediately by a LINE FEED is treated as one EOL marker.
+                    (actualSize == requiredSize + 2 &&
+                        bytesPure[actualSize - 2] == ReadHelper.AsciiCarriageReturn &&
+                        bytesPure[actualSize - 1] == ReadHelper.AsciiLineFeed);
 
                 if (!isCorrectlySized)
                 {
                     return false;
                 }
 
-                var i = 0;
-                for (var col = 0; col < image.HeightInSamples; col++)
+                if (image.ColorSpaceDetails.BaseType == ColorSpace.DeviceCMYK || numberOfComponents == 4)
                 {
-                    for (var row = 0; row < image.WidthInSamples; row++)
+                    int i = 0;
+                    for (int col = 0; col < image.HeightInSamples; col++)
                     {
-                        if (actualColorSpace == ColorSpace.DeviceCMYK)
+                        for (int row = 0; row < image.WidthInSamples; row++)
                         {
                             /*
                              * Where CMYK in 0..1
@@ -53,23 +65,37 @@
                              * B = 255 × (1-Y) × (1-K)
                              */
 
-                            var c = (bytesPure[i++]/255d);
-                            var m = (bytesPure[i++]/255d);
-                            var y = (bytesPure[i++]/255d);
-                            var k = (bytesPure[i++]/255d);
+                            double c = (bytesPure[i++] / 255d);
+                            double m = (bytesPure[i++] / 255d);
+                            double y = (bytesPure[i++] / 255d);
+                            double k = (bytesPure[i++] / 255d);
                             var r = (byte)(255 * (1 - c) * (1 - k));
                             var g = (byte)(255 * (1 - m) * (1 - k));
                             var b = (byte)(255 * (1 - y) * (1 - k));
 
                             builder.SetPixel(r, g, b, row, col);
                         }
-                        else if (is3Byte)
+                    }
+                }
+                else if (is3Byte)
+                {
+                    int i = 0;
+                    for (int col = 0; col < image.HeightInSamples; col++)
+                    {
+                        for (int row = 0; row < image.WidthInSamples; row++)
                         {
                             builder.SetPixel(bytesPure[i++], bytesPure[i++], bytesPure[i++], row, col);
                         }
-                        else
+                    }
+                }
+                else
+                {
+                    int i = 0;
+                    for (int col = 0; col < image.HeightInSamples; col++)
+                    {
+                        for (int row = 0; row < image.WidthInSamples; row++)
                         {
-                            var pixel = bytesPure[i++];
+                            byte pixel = bytesPure[i++];
                             builder.SetPixel(pixel, pixel, pixel, row, col);
                         }
                     }

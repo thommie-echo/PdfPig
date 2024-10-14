@@ -1,9 +1,6 @@
 ﻿namespace UglyToad.PdfPig.Tests.Integration
 {
-    using System;
-    using System.Collections.Generic;
     using Exceptions;
-    using Xunit;
 
     public class EncryptedDocumentTests
     {
@@ -45,6 +42,24 @@
                 {
                     Assert.NotNull(page.Text);
                 }
+            }
+        }
+
+        [Fact]
+        public void CanReadDocumentWithUEAsString()
+        {
+            using (var document = PdfDocument.Open(IntegrationHelpers.GetSpecificTestDocumentPath("string_encryption_key.pdf")))
+            {
+                Assert.NotNull(document.Information.Producer);
+            }
+        }
+        
+        [Fact]
+        public void CanReadDocumentWithEmptyStringEncryptedWithAESEncryptionAndOnlyIV()
+        {
+            using (var document = PdfDocument.Open(IntegrationHelpers.GetSpecificTestDocumentPath("r4_aes_empty_string.pdf")))
+            {
+                Assert.Empty(document.Information.Producer);
             }
         }
 

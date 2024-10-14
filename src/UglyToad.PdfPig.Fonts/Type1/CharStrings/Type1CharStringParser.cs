@@ -8,28 +8,32 @@
     using Commands.PathConstruction;
     using Commands.StartFinishOutline;
     using Core;
-    using Parser;
 
     /// <summary>
     /// Decodes a set of CharStrings to their corresponding Type 1 BuildChar operations.
     /// </summary>
     /// <remarks>
-    /// A charstring is an encrypted sequence of unsigned 8-bit bytes that encode integers and commands. 
+    /// <para>
+    /// A charstring is an encrypted sequence of unsigned 8-bit bytes that encode integers and commands.
     /// Type 1 BuildChar, when interpreting a charstring, will first decrypt it and then will decode
-    /// its bytes one at a time in sequence. 
-    /// 
+    /// its bytes one at a time in sequence.
+    /// </para>
+    /// <para>
     /// The value in a byte indicates a command, a number, or subsequent bytes that are to be interpreted
     /// in a special way.
-    /// 
+    /// </para>
+    /// <para>
     /// Once the bytes are decoded into numbers and commands, the execution of these numbers and commands proceeds in a
-    /// manner similar to the operation of the PostScript language. Type 1 BuildChar uses its own operand stack, 
+    /// manner similar to the operation of the PostScript language. Type 1 BuildChar uses its own operand stack,
     /// called the Type 1 BuildChar operand stack, that is distinct from the PostScript interpreter operand stack.
-    ///  
+    /// </para>
+    /// <para>
     /// This stack holds up to 24 numeric entries. A number, decoded from a charstring, is pushed onto the Type 1
     /// BuildChar operand stack. A command expects its arguments in order on this operand stack with all arguments generally taken
-    /// from the bottom of the stack (first argument bottom-most); 
+    /// from the bottom of the stack (first argument bottom-most);
     /// however, some commands, particularly the subroutine commands, normally work from the top of the stack. If a command returns
     /// results, they are pushed onto the Type 1 BuildChar operand stack (last result topmost).
+    /// </para>
     /// </remarks>
     internal static class Type1CharStringParser
     {
@@ -69,11 +73,11 @@
             return new Type1CharStrings(charStringResults, charStringIndexToName, subroutineResults);
         }
 
-        private static IReadOnlyList<Union<double, LazyType1Command>> ParseSingle(IReadOnlyList<byte> charStringBytes)
+        private static IReadOnlyList<Union<double, LazyType1Command>> ParseSingle(ReadOnlySpan<byte> charStringBytes)
         {
             var interpreted = new List<Union<double, LazyType1Command>>();
 
-            for (var i = 0; i < charStringBytes.Count; i++)
+            for (var i = 0; i < charStringBytes.Length; i++)
             {
                 var b = charStringBytes[i];
 
@@ -100,7 +104,7 @@
             return interpreted;
         }
 
-        private static int InterpretNumber(byte b, IReadOnlyList<byte> bytes, ref int i)
+        private static int InterpretNumber(byte b, ReadOnlySpan<byte> bytes, ref int i)
         {
             if (b >= 32 && b <= 246)
             {
@@ -124,7 +128,7 @@
             return result;
         }
 
-        public static LazyType1Command GetCommand(byte v, IReadOnlyList<byte> bytes, ref int i)
+        public static LazyType1Command GetCommand(byte v, ReadOnlySpan<byte> bytes, ref int i)
         {
             switch (v)
             {

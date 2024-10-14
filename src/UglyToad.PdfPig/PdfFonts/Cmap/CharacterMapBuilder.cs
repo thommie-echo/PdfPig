@@ -1,10 +1,12 @@
-﻿namespace UglyToad.PdfPig.PdfFonts.Cmap
+﻿#nullable disable
+
+namespace UglyToad.PdfPig.PdfFonts.Cmap
 {
+    using Core;
     using System;
     using System.Collections.Generic;
     using System.Linq;
     using System.Text;
-    using Core;
 
     /// <summary>
     /// A mutable class used when parsing and generating a <see cref="CMap"/>.
@@ -36,14 +38,17 @@
         /// </remarks>
         public string Name { get; set; }
 
+#nullable enable
+
         /// <summary>
         /// Defines the version of this CIDFont file.
         /// </summary>
         /// <remarks>
         /// Defined as optional.
         /// </remarks>
-        public string Version { get; set; }
+        public string? Version { get; set; }
 
+#nullable disable
         /// <summary>
         /// Defines changes to the internal structure of Character Map files
         /// or operator semantics.
@@ -62,14 +67,14 @@
 
         public Dictionary<int, string> BaseFontCharacterMap { get; } = new Dictionary<int, string>();
 
-        public void AddBaseFontCharacter(IReadOnlyList<byte> bytes, IReadOnlyList<byte> value)
+        public void AddBaseFontCharacter(ReadOnlySpan<byte> bytes, ReadOnlySpan<byte> value)
         {
-            AddBaseFontCharacter(bytes, CreateStringFromBytes(value.ToArray()));
+            AddBaseFontCharacter(bytes, CreateStringFromBytes(value));
         }
 
-        public void AddBaseFontCharacter(IReadOnlyList<byte> bytes, string value)
+        public void AddBaseFontCharacter(ReadOnlySpan<byte> bytes, string value)
         {
-            var code = GetCodeFromArray(bytes, bytes.Count);
+            var code = GetCodeFromArray(bytes);
 
             BaseFontCharacterMap[code] = value;
         }
@@ -92,12 +97,10 @@
 
             if (SystemInfoBuilder.HasOrdering && SystemInfoBuilder.HasRegistry && SystemInfoBuilder.HasSupplement)
             {
-                return new CharacterIdentifierSystemInfo(SystemInfoBuilder.Registry, SystemInfoBuilder.Ordering, SystemInfoBuilder.Supplement);
+                return new CharacterIdentifierSystemInfo(SystemInfoBuilder.Registry!, SystemInfoBuilder.Ordering!, SystemInfoBuilder.Supplement);
             }
 
             return CharacterIdentifierSystemInfo;
-
-            throw new InvalidOperationException("The Character Identifier System Information was never set.");
         }
 
         public void UseCMap(CMap other)
@@ -117,32 +120,28 @@
 
         private static IReadOnlyList<T> Combine<T>(IReadOnlyList<T> a, IReadOnlyList<T> b)
         {
-            if (a == null && b == null)
+            if (a is null && b is null)
             {
                 return new T[0];
             }
 
-            if (a == null)
+            if (a is null)
             {
                 return b;
             }
 
-            if (b == null)
+            if (b is null)
             {
                 return a;
             }
 
-            var result = new List<T>(a);
-
-            result.AddRange(b);
-
-            return result;
+            return [.. a, .. b];
         }
 
-        private int GetCodeFromArray(IReadOnlyList<byte> data, int length)
+        private int GetCodeFromArray(ReadOnlySpan<byte> data)
         {
             int code = 0;
-            for (int i = 0; i < length; i++)
+            for (int i = 0; i < data.Length; i++)
             {
                 code <<= 8;
                 code |= (data[i] + 256) % 256;
@@ -150,7 +149,7 @@
             return code;
         }
 
-        private static string CreateStringFromBytes(byte[] bytes)
+        private static string CreateStringFromBytes(ReadOnlySpan<byte> bytes)
         {
             return bytes.Length == 1
                 ? OtherEncodings.BytesAsLatin1String(bytes)

@@ -3,38 +3,33 @@
     using Content;
     using Core;
     using DocumentLayoutAnalysis;
+    using Graphics;
     using Graphics.Colors;
     using PAGE;
+    using PageSegmenter;
+    using ReadingOrderDetector;
     using System;
     using System.Collections.Generic;
     using System.Linq;
     using System.Xml;
     using System.Xml.Serialization;
-    using UglyToad.PdfPig.DocumentLayoutAnalysis.PageSegmenter;
-    using UglyToad.PdfPig.DocumentLayoutAnalysis.ReadingOrderDetector;
-    using UglyToad.PdfPig.Graphics;
     using Util;
 
     /// <summary>
     /// PAGE-XML 2019-07-15 (XML) text exporter.
     /// <para>See https://github.com/PRImA-Research-Lab/PAGE-XML </para>
     /// </summary>
-    public class PageXmlTextExporter : ITextExporter
+    public sealed class PageXmlTextExporter : ITextExporter
     {
         private readonly IPageSegmenter pageSegmenter;
         private readonly IWordExtractor wordExtractor;
         private readonly IReadingOrderDetector readingOrderDetector;
-
+        private readonly Func<string, string> invalidCharacterHandler;
         private readonly double scale;
         private readonly string indentChar;
 
-        private int lineCount;
-        private int wordCount;
-        private int glyphCount;
-        private int regionCount;
-        private int groupOrderCount;
-
-        private List<PageXmlDocument.PageXmlRegionRefIndexed> orderedRegions;
+        /// <inheritdoc/>
+        public InvalidCharStrategy InvalidCharStrategy { get; }
 
         /// <summary>
         /// PAGE-XML 2019-07-15 (XML) text exporter.
@@ -42,20 +37,62 @@
         /// </summary>
         /// <param name="wordExtractor"></param>
         /// <param name="pageSegmenter"></param>
-		/// <param name="readingOrderDetector"></param>
+        /// <param name="readingOrderDetector"></param>
+        /// <param name="scale"></param>
+        /// <param name="indentChar">Indent character.</param>
+        /// <param name="invalidCharacterHandler">How to handle invalid characters.</param>
+        public PageXmlTextExporter(IWordExtractor wordExtractor, IPageSegmenter pageSegmenter,
+                                   IReadingOrderDetector readingOrderDetector,
+                                   double scale, string indentChar,
+                                   Func<string, string> invalidCharacterHandler)
+            : this(wordExtractor, pageSegmenter, readingOrderDetector, scale, indentChar,
+                  InvalidCharStrategy.Custom, invalidCharacterHandler)
+        { }
+
+        /// <summary>
+        /// PAGE-XML 2019-07-15 (XML) text exporter.
+        /// <para>See https://github.com/PRImA-Research-Lab/PAGE-XML </para>
+        /// </summary>
+        /// <param name="wordExtractor"></param>
+        /// <param name="pageSegmenter"></param>
+        /// <param name="readingOrderDetector"></param>
         /// <param name="scale"></param>
         /// <param name="indent">Indent character.</param>
-        public PageXmlTextExporter(IWordExtractor wordExtractor, IPageSegmenter pageSegmenter, IReadingOrderDetector readingOrderDetector = null, double scale = 1.0, string indent = "\t")
+        /// <param name="invalidCharacterStrategy">How to handle invalid characters.</param>
+        public PageXmlTextExporter(IWordExtractor wordExtractor, IPageSegmenter pageSegmenter,
+                                   IReadingOrderDetector readingOrderDetector = null,
+                                   double scale = 1.0, string indent = "\t",
+                                   InvalidCharStrategy invalidCharacterStrategy = InvalidCharStrategy.DoNotCheck)
+            : this(wordExtractor, pageSegmenter, readingOrderDetector, scale, indent,
+                  invalidCharacterStrategy, null)
+        { }
+
+        private PageXmlTextExporter(IWordExtractor wordExtractor, IPageSegmenter pageSegmenter,
+                           IReadingOrderDetector readingOrderDetector,
+                           double scale, string indentChar,
+                           InvalidCharStrategy invalidCharacterStrategy,
+                           Func<string, string> invalidCharacterHandler)
         {
             this.wordExtractor = wordExtractor;
             this.pageSegmenter = pageSegmenter;
             this.readingOrderDetector = readingOrderDetector;
             this.scale = scale;
-            this.indentChar = indent;
+            this.indentChar = indentChar ?? string.Empty;
+            InvalidCharStrategy = invalidCharacterStrategy;
+
+            if (invalidCharacterHandler is null)
+            {
+                this.invalidCharacterHandler = TextExporterHelper.GetXmlInvalidCharHandler(InvalidCharStrategy);
+            }
+            else
+            {
+                this.invalidCharacterHandler = invalidCharacterHandler;
+            }
         }
 
         /// <summary>
         /// Get the PAGE-XML (XML) string of the pages layout.
+        /// <para>Not implemented, use <see cref="Get(Page)"/> instead.</para>
         /// </summary>
         /// <param name="document"></param>
         /// <param name="includePaths">Draw PdfPaths present in the page.</param>
@@ -80,74 +117,87 @@
         /// <param name="includePaths">Draw PdfPaths present in the page.</param>
         public string Get(Page page, bool includePaths)
         {
-            lineCount = 0;
-            wordCount = 0;
-            glyphCount = 0;
-            regionCount = 0;
-            groupOrderCount = 0;
-            orderedRegions = new List<PageXmlDocument.PageXmlRegionRefIndexed>();
+            PageXmlData data = new PageXmlData();
+
+            DateTime utcNow = DateTime.UtcNow;
 
             PageXmlDocument pageXmlDocument = new PageXmlDocument()
             {
                 Metadata = new PageXmlDocument.PageXmlMetadata()
                 {
-                    Created = DateTime.UtcNow,
-                    LastChange = DateTime.UtcNow,
+                    Created = utcNow,
+                    LastChange = utcNow,
                     Creator = "PdfPig",
                     Comments = pageSegmenter.GetType().Name + "|" + wordExtractor.GetType().Name,
                 },
                 PcGtsId = "pc-" + page.GetHashCode()
             };
 
-            pageXmlDocument.Page = ToPageXmlPage(page, includePaths);
+            pageXmlDocument.Page = ToPageXmlPage(page, data, includePaths);
 
             return Serialize(pageXmlDocument);
         }
 
-        private string PointToString(PdfPoint point, double height)
+        /// <summary>
+        /// Converts a point to a string
+        /// </summary>
+        /// <param name="point"></param>
+        /// <param name="pageWidth">The width of the page where the pdf point is located on</param>
+        /// <param name="pageHeight">The height of the page where the pdf point is located on</param>
+        /// <param name="scaleToApply"></param>
+        /// <returns></returns>
+        public static string PointToString(PdfPoint point, double pageWidth, double pageHeight, double scaleToApply = 1.0)
         {
-            double x = Math.Round(point.X * scale);
-            double y = Math.Round((height - point.Y) * scale);
-            return (x > 0 ? x : 0).ToString("0") + "," + (y > 0 ? y : 0).ToString("0");
+            double x = Math.Round(point.X * scaleToApply);
+            double y = Math.Round((pageHeight - point.Y) * scaleToApply);
+
+            // move away from borders
+            x = x > 1 ? x : 1;
+            y = y > 1 ? y : 1;
+
+            x = x < (pageWidth - 1) ? x : pageWidth - 1;
+            y = y < (pageHeight - 1) ? y : pageHeight - 1;
+
+            return x.ToString("0") + "," + y.ToString("0");
         }
 
-        private string ToPoints(IEnumerable<PdfPoint> points, double height)
+        private string ToPoints(IEnumerable<PdfPoint> points, double pageWidth, double pageHeight)
         {
-            return string.Join(" ", points.Select(p => PointToString(p, height)));
+            return string.Join(" ", points.Select(p => PointToString(p, pageWidth, pageHeight, scale)));
         }
 
-        private string ToPoints(PdfRectangle pdfRectangle, double height)
+        private string ToPoints(PdfRectangle pdfRectangle, double pageWidth, double pageHeight)
         {
-            return ToPoints(new[] { pdfRectangle.BottomLeft, pdfRectangle.TopLeft, pdfRectangle.TopRight, pdfRectangle.BottomRight }, height);
+            return ToPoints(new[] { pdfRectangle.BottomLeft, pdfRectangle.TopLeft, pdfRectangle.TopRight, pdfRectangle.BottomRight }, pageWidth, pageHeight);
         }
 
-        private PageXmlDocument.PageXmlCoords ToCoords(PdfRectangle pdfRectangle, double height)
+        private PageXmlDocument.PageXmlCoords ToCoords(PdfRectangle pdfRectangle, double pageWidth, double pageHeight)
         {
             return new PageXmlDocument.PageXmlCoords()
             {
-                Points = ToPoints(pdfRectangle, height)
+                Points = ToPoints(pdfRectangle, pageWidth, pageHeight)
             };
         }
 
         /// <summary>
         /// PageXml Text colour in RGB encoded format
-        /// <para>(red value) + (256 x green value) + (65536 x blue value).</para> 
+        /// <para>(red value) + (256 x green value) + (65536 x blue value).</para>
         /// </summary>
         private string ToRgbEncoded(IColor color)
         {
-            var rgb = color.ToRGBValues();
-            int red = (int)Math.Round(255f * (float)rgb.r);
-            int green = 256 * (int)Math.Round(255f * (float)rgb.g);
-            int blue = 65536 * (int)Math.Round(255f * (float)rgb.b);
+            var (r, g, b) = color.ToRGBValues();
+            int red = Convert.ToByte(255.0 * r);
+            int green = 256 * Convert.ToByte(255.0 * g);
+            int blue = 65536 * Convert.ToByte(255.0 * b);
             int sum = red + green + blue;
 
             // as per below, red and blue order might be inverted... var colorWin = System.Drawing.Color.FromArgb(sum);
             return sum.ToString();
         }
 
-        private PageXmlDocument.PageXmlPage ToPageXmlPage(Page page, bool includePaths)
+        private PageXmlDocument.PageXmlPage ToPageXmlPage(Page page, PageXmlData data, bool includePaths)
         {
-            var pageXmlPage = new PageXmlDocument.PageXmlPage()
+            var pageXmlPage = new PageXmlDocument.PageXmlPage
             {
                 ImageFilename = "unknown",
                 ImageHeight = (int)Math.Round(page.Height * scale),
@@ -166,16 +216,17 @@
                     blocks = readingOrderDetector.Get(blocks).ToList();
                 }
 
-                regions.AddRange(blocks.Select(b => ToPageXmlTextRegion(b, page.Height)));
+                regions.AddRange(blocks.Select(b => ToPageXmlTextRegion(b, data, page.Width, page.Height)));
 
-                if (orderedRegions.Any())
+                if (data.OrderedRegions.Count > 0)
                 {
+                    data.GroupOrdersCount++;
                     pageXmlPage.ReadingOrder = new PageXmlDocument.PageXmlReadingOrder()
                     {
                         Item = new PageXmlDocument.PageXmlOrderedGroup()
                         {
-                            Items = orderedRegions.ToArray(),
-                            Id = "g" + groupOrderCount++
+                            Items = data.OrderedRegions.ToArray(),
+                            Id = "g" + data.GroupOrdersCount
                         }
                     };
                 }
@@ -184,15 +235,19 @@
             var images = page.GetImages().ToList();
             if (images.Count > 0)
             {
-                regions.AddRange(images.Select(i => ToPageXmlImageRegion(i, page.Height)));
+                regions.AddRange(images.Select(i => ToPageXmlImageRegion(i, data, page.Width, page.Height)));
             }
 
             if (includePaths)
             {
-                var graphicalElements = page.ExperimentalAccess.Paths.Select(p => ToPageXmlLineDrawingRegion(p, page.Height));
-                if (graphicalElements.Where(g => g != null).Count() > 0)
+                foreach (var path in page.ExperimentalAccess.Paths)
                 {
-                    regions.AddRange(graphicalElements.Where(g => g != null));
+                    var graphicalElement = ToPageXmlLineDrawingRegion(path, data, page.Width, page.Height);
+
+                    if (graphicalElement != null)
+                    {
+                        regions.Add(graphicalElement);
+                    }
                 }
             }
 
@@ -200,40 +255,40 @@
             return pageXmlPage;
         }
 
-        private PageXmlDocument.PageXmlLineDrawingRegion ToPageXmlLineDrawingRegion(PdfPath pdfPath, double height)
+        private PageXmlDocument.PageXmlLineDrawingRegion ToPageXmlLineDrawingRegion(PdfPath pdfPath, PageXmlData data, double pageWidth, double pageHeight)
         {
             var bbox = pdfPath.GetBoundingRectangle();
             if (bbox.HasValue)
             {
-                regionCount++;
+                data.RegionsCount++;
                 return new PageXmlDocument.PageXmlLineDrawingRegion()
                 {
-                    Coords = ToCoords(bbox.Value, height),
-                    Id = "r" + regionCount
+                    Coords = ToCoords(bbox.Value, pageWidth, pageHeight),
+                    Id = "r" + data.RegionsCount
                 };
             }
             return null;
         }
 
-        private PageXmlDocument.PageXmlImageRegion ToPageXmlImageRegion(IPdfImage pdfImage, double height)
+        private PageXmlDocument.PageXmlImageRegion ToPageXmlImageRegion(IPdfImage pdfImage, PageXmlData data, double pageWidth, double pageHeight)
         {
-            regionCount++;
+            data.RegionsCount++;
             var bbox = pdfImage.Bounds;
             return new PageXmlDocument.PageXmlImageRegion()
             {
-                Coords = ToCoords(bbox, height),
-                Id = "r" + regionCount
+                Coords = ToCoords(bbox, pageWidth, pageHeight),
+                Id = "r" + data.RegionsCount
             };
         }
 
-        private PageXmlDocument.PageXmlTextRegion ToPageXmlTextRegion(TextBlock textBlock, double height)
+        private PageXmlDocument.PageXmlTextRegion ToPageXmlTextRegion(TextBlock textBlock, PageXmlData data, double pageWidth, double pageHeight)
         {
-            regionCount++;
-            string regionId = "r" + regionCount;
+            data.RegionsCount++;
+            string regionId = "r" + data.RegionsCount;
 
             if (readingOrderDetector != null && textBlock.ReadingOrder > -1)
             {
-                orderedRegions.Add(new PageXmlDocument.PageXmlRegionRefIndexed()
+                data.OrderedRegions.Add(new PageXmlDocument.PageXmlRegionRefIndexed()
                 {
                     RegionRef = regionId,
                     Index = textBlock.ReadingOrder
@@ -242,45 +297,63 @@
 
             return new PageXmlDocument.PageXmlTextRegion()
             {
-                Coords = ToCoords(textBlock.BoundingBox, height),
+                Coords = ToCoords(textBlock.BoundingBox, pageWidth, pageHeight),
                 Type = PageXmlDocument.PageXmlTextSimpleType.Paragraph,
-                TextLines = textBlock.TextLines.Select(l => ToPageXmlTextLine(l, height)).ToArray(),
-                TextEquivs = new[] { new PageXmlDocument.PageXmlTextEquiv() { Unicode = textBlock.Text } },
+                TextLines = textBlock.TextLines.Select(l => ToPageXmlTextLine(l, data, pageWidth, pageHeight)).ToArray(),
+                TextEquivs = new[]
+                {
+                    new PageXmlDocument.PageXmlTextEquiv()
+                    {
+                        Unicode = invalidCharacterHandler(textBlock.Text)
+                    }
+                },
                 Id = regionId
             };
         }
 
-        private PageXmlDocument.PageXmlTextLine ToPageXmlTextLine(TextLine textLine, double height)
+        private PageXmlDocument.PageXmlTextLine ToPageXmlTextLine(TextLine textLine, PageXmlData data, double pageWidth, double pageHeight)
         {
-            lineCount++;
+            data.LinesCount++;
             return new PageXmlDocument.PageXmlTextLine()
             {
-                Coords = ToCoords(textLine.BoundingBox, height),
+                Coords = ToCoords(textLine.BoundingBox, pageWidth, pageHeight),
                 Production = PageXmlDocument.PageXmlProductionSimpleType.Printed,
-                Words = textLine.Words.Select(w => ToPageXmlWord(w, height)).ToArray(),
-                TextEquivs = new[] { new PageXmlDocument.PageXmlTextEquiv() { Unicode = textLine.Text } },
-                Id = "l" + lineCount
+                Words = textLine.Words.Select(w => ToPageXmlWord(w, data, pageWidth, pageHeight)).ToArray(),
+                TextEquivs = new[]
+                {
+                    new PageXmlDocument.PageXmlTextEquiv()
+                    {
+                        Unicode = invalidCharacterHandler(textLine.Text)
+                    }
+                },
+                Id = "l" + data.LinesCount
             };
         }
 
-        private PageXmlDocument.PageXmlWord ToPageXmlWord(Word word, double height)
+        private PageXmlDocument.PageXmlWord ToPageXmlWord(Word word, PageXmlData data, double pageWidth, double pageHeight)
         {
-            wordCount++;
+            data.WordsCount++;
             return new PageXmlDocument.PageXmlWord()
             {
-                Coords = ToCoords(word.BoundingBox, height),
-                Glyphs = word.Letters.Select(l => ToPageXmlGlyph(l, height)).ToArray(),
-                TextEquivs = new[] { new PageXmlDocument.PageXmlTextEquiv() { Unicode = word.Text } },
-                Id = "w" + wordCount
+                Coords = ToCoords(word.BoundingBox, pageWidth, pageHeight),
+                Glyphs = word.Letters.Select(l => ToPageXmlGlyph(l, data, pageWidth, pageHeight)).ToArray(),
+                TextEquivs = new[]
+                {
+                    new PageXmlDocument.PageXmlTextEquiv()
+                    {
+                        Unicode = invalidCharacterHandler(word.Text)
+                    }
+                },
+                Id = "w" + data.WordsCount
             };
         }
 
-        private PageXmlDocument.PageXmlGlyph ToPageXmlGlyph(Letter letter, double height)
+        private PageXmlDocument.PageXmlGlyph ToPageXmlGlyph(Letter letter, PageXmlData data, double pageWidth, double pageHeight)
         {
-            glyphCount++;
+            data.GlyphsCount++;
             return new PageXmlDocument.PageXmlGlyph()
             {
-                Coords = ToCoords(letter.GlyphRectangle, height),
+                Coords = ToCoords(letter.GlyphRectangle, pageWidth, pageHeight),
                 Ligature = false,
                 Production = PageXmlDocument.PageXmlProductionSimpleType.Printed,
                 TextStyle = new PageXmlDocument.PageXmlTextStyle()
@@ -289,8 +362,14 @@
                     FontFamily = letter.FontName,
                     TextColourRgb = ToRgbEncoded(letter.Color),
                 },
-                TextEquivs = new[] { new PageXmlDocument.PageXmlTextEquiv() { Unicode = letter.Value } },
-                Id = "c" + glyphCount
+                TextEquivs = new[]
+                {
+                    new PageXmlDocument.PageXmlTextEquiv()
+                    {
+                        Unicode = invalidCharacterHandler(letter.Value)
+                    }
+                },
+                Id = "c" + data.GlyphsCount
             };
         }
 
@@ -302,6 +381,7 @@
                 Encoding = System.Text.Encoding.UTF8,
                 Indent = true,
                 IndentChars = indentChar,
+                CheckCharacters = InvalidCharStrategy != InvalidCharStrategy.DoNotCheck,
             };
 
             using (var memoryStream = new System.IO.MemoryStream())
@@ -319,10 +399,34 @@
         {
             XmlSerializer serializer = new XmlSerializer(typeof(PageXmlDocument));
 
-            using (var reader = XmlReader.Create(xmlPath))
+            var settings = new XmlReaderSettings()
+            {
+                CheckCharacters = false
+            };
+
+            using (var reader = XmlReader.Create(xmlPath, settings))
             {
                 return (PageXmlDocument)serializer.Deserialize(reader);
             }
+        }
+
+        /// <summary>
+        /// Class to keep track of a page data.
+        /// </summary>
+        private sealed class PageXmlData
+        {
+            public PageXmlData()
+            {
+                OrderedRegions = new List<PageXmlDocument.PageXmlRegionRefIndexed>();
+            }
+
+            public int LinesCount { get; set; }
+            public int WordsCount { get; set; }
+            public int GlyphsCount { get; set; }
+            public int RegionsCount { get; set; }
+            public int GroupOrdersCount { get; set; }
+
+            public List<PageXmlDocument.PageXmlRegionRefIndexed> OrderedRegions { get; }
         }
     }
 }

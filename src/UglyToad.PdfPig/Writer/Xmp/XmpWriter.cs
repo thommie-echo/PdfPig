@@ -7,6 +7,8 @@ using UglyToad.PdfPig.Tokens;
 
 namespace UglyToad.PdfPig.Writer.Xmp
 {
+    using System.Globalization;
+
     internal static class XmpWriter
     {
         private const string Xmptk = "Adobe XMP Core 5.6-c014 79.156797, 2014/08/20-09:53:02        ";
@@ -36,8 +38,10 @@ namespace UglyToad.PdfPig.Writer.Xmp
         private const string PdfAIdentificationExtensionPrefix = "pdfaid";
         private const string PdfAIdentificationExtensionNamespace = "http://www.aiim.org/pdfa/ns/id/";
         
-        public static StreamToken GenerateXmpStream(PdfDocumentBuilder.DocumentInformationBuilder builder, decimal version,
-            PdfAStandard standard)
+        public static StreamToken GenerateXmpStream(
+            PdfDocumentBuilder.DocumentInformationBuilder builder, 
+            double version,
+            PdfAStandard standard, XDocument? additionalXmpMetadata)
         {
             XNamespace xmpMeta = XmpMetaNamespace;
             XNamespace rdf = RdfNamespace;
@@ -48,32 +52,29 @@ namespace UglyToad.PdfPig.Writer.Xmp
 
             // Dublin Core Schema
             AddElementsForSchema(rdfDescriptionElement, DublinCorePrefix, DublinCoreNamespace, builder,
-                new List<SchemaMapper>
-                {
+                [
                     new SchemaMapper("format", b => "application/pdf"),
                     new SchemaMapper("creator", b => b.Author),
                     new SchemaMapper("description", b => b.Subject),
                     new SchemaMapper("title", b => b.Title)
-                });
+                ]);
 
             // XMP Basic Schema
             AddElementsForSchema(rdfDescriptionElement, XmpBasicPrefix, XmpBasicNamespace, builder,
-                new List<SchemaMapper>
-                {
+                [
                     new SchemaMapper("CreatorTool", b => b.Creator)
-                });
+                ]);
 
             // Adobe PDF Schema
             AddElementsForSchema(rdfDescriptionElement, AdobePdfPrefix, AdobePdfNamespace, builder,
-                new List<SchemaMapper>
-                {
-                    new SchemaMapper("PDFVersion", b => "1.7"),
+                [
+                    new SchemaMapper("PDFVersion", b => version.ToString("F1", CultureInfo.InvariantCulture)),
                     new SchemaMapper("Producer", b => b.Producer)
-                });
+                ]);
 
             var pdfAIdContainer = GetVersionAndConformanceLevelIdentificationElement(rdf, emptyRdfAbout, standard);
-            
-            var document = new XDocument(
+
+            var document = MergeXmpXdocuments(new XDocument(
                 new XElement(xmpMeta + "xmpmeta", GetNamespaceAttribute(XmpMetaPrefix, XmpMetaNamespace),
                     new XAttribute(xmpMeta + "xmptk", Xmptk),
                     new XElement(rdf + "RDF",
@@ -82,7 +83,7 @@ namespace UglyToad.PdfPig.Writer.Xmp
                         pdfAIdContainer
                     )
                 )
-            );
+            ), additionalXmpMetadata!);
 
             var xml = document.ToString(SaveOptions.None).Replace("\r\n", "\n");
             xml = $"<?xpacket begin=\"\ufeff\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n{xml}\n<?xpacket end=\"r\"?>";
@@ -109,7 +110,7 @@ namespace UglyToad.PdfPig.Writer.Xmp
             {
                 var value = mapper.ValueFunc(builder);
 
-                if (value == null)
+                if (value is null)
                 {
                     continue;
                 }
@@ -146,6 +147,14 @@ namespace UglyToad.PdfPig.Writer.Xmp
                 case PdfAStandard.A2A:
                     part = 2;
                     conformance = "A";
+                    break;
+                case PdfAStandard.A3A:
+                    part = 3;
+                    conformance = "A";
+                    break;
+                case PdfAStandard.A3B:
+                    part = 3;
+                    conformance = "B";
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(standard), standard, null);
@@ -216,17 +225,54 @@ namespace UglyToad.PdfPig.Writer.Xmp
             return li;
         }
 
-        private class SchemaMapper
+        private sealed class SchemaMapper
         {
             public string Name { get; }
 
-            public Func<PdfDocumentBuilder.DocumentInformationBuilder, string> ValueFunc { get; }
+            public Func<PdfDocumentBuilder.DocumentInformationBuilder, string?> ValueFunc { get; }
 
-            public SchemaMapper(string name, Func<PdfDocumentBuilder.DocumentInformationBuilder, string> valueFunc)
+            public SchemaMapper(string name, Func<PdfDocumentBuilder.DocumentInformationBuilder, string?> valueFunc)
             {
                 Name = name;
                 ValueFunc = valueFunc;
             }
+        }
+
+        /// <summary>
+        /// Merge multiple System.Xml.Linq.XDocument objects.
+        /// Nodes in rdf:Description nodes of XDocuments with higher array index which already occur in rdf:Description nodes of XDocuments
+        /// with a lower index won't be inserted. This leads to a simple XML merge, where no duplicate pdf:PDFVersion or pdfaid:conformance
+        /// nodes will occur.
+        /// </summary>
+        private static XDocument MergeXmpXdocuments(params XDocument[] xDocuments)
+        {
+            XDocument document = new XDocument(xDocuments.FirstOrDefault());
+            foreach (XDocument xdocOriginal in xDocuments.Skip(1).Where(doc => doc != null))
+            {
+                XDocument xdoc = new XDocument(xdocOriginal);
+                XElement rdfMainNode = document.Descendants(XNamespace.Get(RdfNamespace) + "RDF").First();
+                XElement rdfCurrentNode = xdoc.Descendants(XNamespace.Get(RdfNamespace) + "RDF").First();
+
+                // Remove all children of rdf:Description which are already existing in the main node
+                var allDescriptions = rdfCurrentNode.Elements().ToList();
+                foreach (var description in allDescriptions)
+                {
+                    foreach (XElement descriptionElement in description.Elements().ToList())
+                    {
+                        if (rdfMainNode.
+                            Descendants(XNamespace.Get(RdfNamespace) + "Description").
+                            SelectMany(d => d.Descendants()).
+                            Select(mx => mx.Name).
+                            Contains(descriptionElement.Name))
+                        {
+                            descriptionElement.Remove();
+                        }
+                    }
+                }
+
+                rdfMainNode.Add(allDescriptions);
+            }
+            return document;
         }
     }
 }

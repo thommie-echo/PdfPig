@@ -4,7 +4,6 @@
     using System.IO;
     using System.Linq;
 
-    /// <inheritdoc />
     /// <summary>
     /// Set the nonstroking color based on the current color space.
     /// </summary>
@@ -21,13 +20,13 @@
         /// <summary>
         /// The values for the color, 1 for grayscale, 3 for RGB, 4 for CMYK.
         /// </summary>
-        public IReadOnlyList<decimal> Operands { get; }
+        public IReadOnlyList<double> Operands { get; }
 
         /// <summary>
         /// Create a new <see cref="SetNonStrokeColor"/>.
         /// </summary>
         /// <param name="operands">The color operands.</param>
-        public SetNonStrokeColor(decimal[] operands)
+        public SetNonStrokeColor(double[] operands)
         {
             Operands = operands;
         }
@@ -35,20 +34,7 @@
         /// <inheritdoc />
         public void Run(IOperationContext operationContext)
         {
-            switch (Operands.Count)
-            {
-                case 1:
-                    operationContext.ColorSpaceContext.SetNonStrokingColorGray(Operands[0]);
-                    break;
-                case 3:
-                    operationContext.ColorSpaceContext.SetNonStrokingColorRgb(Operands[0], Operands[1], Operands[2]);
-                    break;
-                case 4:
-                    operationContext.ColorSpaceContext.SetNonStrokingColorCmyk(Operands[0], Operands[1], Operands[2], Operands[3]);
-                    break;
-                default:
-                    return;
-            }
+            operationContext.GetCurrentState().ColorSpaceContext.SetNonStrokingColor(Operands);
         }
 
         /// <inheritdoc />
@@ -56,7 +42,7 @@
         {
             foreach (var operand in Operands)
             {
-                stream.WriteDecimal(operand);
+                stream.WriteDouble(operand);
                 stream.WriteWhiteSpace();
             }
 

@@ -1,12 +1,9 @@
 ﻿namespace UglyToad.PdfPig.Tests.Filters
 {
-    using System;
-    using System.Collections.Generic;
     using System.Text;
     using PdfPig.Filters;
     using PdfPig.Tokens;
-    using Xunit;
-
+ 
     public class AsciiHexDecodeFilterTests
     {
         private readonly DictionaryToken dictionary = new DictionaryToken(new Dictionary<NameToken, IToken>());
@@ -21,7 +18,7 @@
 
             var decoded = new AsciiHexDecodeFilter().Decode(input, dictionary, 1);
 
-            var decodedText = Encoding.ASCII.GetString(decoded);
+            var decodedText = Encoding.ASCII.GetString(decoded.ToArray());
 
             Assert.Equal(text, decodedText);
         }
@@ -36,7 +33,7 @@
 
             var decoded = new AsciiHexDecodeFilter().Decode(input, dictionary, 1);
 
-            var decodedText = Encoding.ASCII.GetString(decoded);
+            var decodedText = Encoding.ASCII.GetString(decoded.ToArray());
 
             Assert.Equal(text, decodedText);
         }
@@ -52,7 +49,7 @@
 
             var decoded = new AsciiHexDecodeFilter().Decode(input, dictionary, 1);
 
-            var decodedText = Encoding.ASCII.GetString(decoded);
+            var decodedText = Encoding.ASCII.GetString(decoded.ToArray());
 
             Assert.Equal(text, decodedText);
         }
@@ -66,7 +63,7 @@
 
             var decoded = new AsciiHexDecodeFilter().Decode(input, dictionary, 1);
 
-            var decodedText = Encoding.ASCII.GetString(decoded);
+            var decodedText = Encoding.ASCII.GetString(decoded.ToArray());
 
             Assert.Equal(text, decodedText);
         }
@@ -90,7 +87,9 @@
 
             var decoded = new AsciiHexDecodeFilter().Decode(input, dictionary, 1);
 
-            var decodedText = Encoding.UTF7.GetString(decoded);
+#pragma warning disable SYSLIB0001
+            var decodedText = Encoding.UTF7.GetString(decoded.ToArray());
+#pragma warning restore SYSLIB0001
 
             Assert.Equal("®P", decodedText);
         }
@@ -104,7 +103,7 @@
 
             var decoded = new AsciiHexDecodeFilter().Decode(input, dictionary, 1);
 
-            var decodedText = Encoding.ASCII.GetString(decoded);
+            var decodedText = Encoding.ASCII.GetString(decoded.ToArray());
 
             Assert.Equal(text, decodedText);
         }

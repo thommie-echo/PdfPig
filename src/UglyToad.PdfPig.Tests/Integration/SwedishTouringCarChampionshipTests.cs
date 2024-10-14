@@ -2,7 +2,6 @@
 {
     using Content;
     using UglyToad.PdfPig.Images.Png;
-    using Xunit;
 
     public class SwedishTouringCarChampionshipTests
     {
@@ -25,7 +24,7 @@
         {
             using (var document = PdfDocument.Open(GetFilename()))
             {
-                Assert.Equal(1.4m, document.Version);
+                Assert.Equal(1.4, document.Version);
             }
         }
 
@@ -100,7 +99,7 @@
                 {
                     foreach (var image in page.GetImages())
                     {
-                        if (!image.TryGetBytes(out _))
+                        if (!image.TryGetBytesAsMemory(out _))
                         {
                             continue;
                         }

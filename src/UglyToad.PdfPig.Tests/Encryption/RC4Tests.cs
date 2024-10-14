@@ -1,9 +1,7 @@
 ﻿namespace UglyToad.PdfPig.Tests.Encryption
 {
-    using System.Linq;
     using PdfPig.Encryption;
     using PdfPig.Tokens;
-    using Xunit;
 
     public class RC4Tests
     {
@@ -37,7 +35,7 @@
             var result = new byte[hex.Length / 2];
             for (var i = 0; i < hex.Length; i += 2)
             {
-                result[i / 2] = HexToken.Convert(hex[i], hex[i + 1]);
+                result[i / 2] = HexToken.ConvertPair(hex[i], hex[i + 1]);
             }
 
             return result;

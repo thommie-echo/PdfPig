@@ -2,14 +2,13 @@
 {
     using PdfPig.Core;
     using PdfPig.Fonts.TrueType;
-    using Xunit;
 
     public class TrueTypeDataBytesTests
     {
         [Fact]
         public void ReadUnsignedInt()
         {
-            var input = new ByteArrayInputBytes(new byte[]
+            var input = new MemoryInputBytes(new byte[]
             {
                 220,
                 43,

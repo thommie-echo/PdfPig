@@ -2,6 +2,7 @@
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics.CodeAnalysis;
     using Core;
     using CrossReference;
     using Parser.Parts;
@@ -14,11 +15,11 @@
         /// <summary>
         /// Since we want to scan objects while reading the cross reference table we lazily load it when it's ready.
         /// </summary>
-        private readonly Func<CrossReferenceTable> crossReferenceTable;
+        private readonly Func<CrossReferenceTable?> crossReferenceTable;
 
         private readonly IInputBytes bytes;
 
-        private IReadOnlyDictionary<IndirectReference, long> bruteForcedOffsets;
+        private IReadOnlyDictionary<IndirectReference, long>? bruteForcedOffsets;
 
         /// <summary>
         /// Indicates whether we now have a cross reference table.
@@ -27,7 +28,7 @@
 
         private readonly Dictionary<IndirectReference, long> offsets = new Dictionary<IndirectReference, long>();
 
-        public ObjectLocationProvider(Func<CrossReferenceTable> crossReferenceTable, IInputBytes bytes)
+        public ObjectLocationProvider(Func<CrossReferenceTable?> crossReferenceTable, IInputBytes bytes)
         {
             this.crossReferenceTable = crossReferenceTable;
             this.bytes = bytes;
@@ -55,7 +56,7 @@
                 return true;
             }
 
-            if (bruteForcedOffsets == null)
+            if (bruteForcedOffsets is null)
             {
                 bruteForcedOffsets = BruteForceSearcher.GetObjectLocations(bytes);
             }
@@ -68,14 +69,14 @@
             offsets[reference] = offset;
         }
 
-        public bool TryGetCached(IndirectReference reference, out ObjectToken objectToken)
+        public bool TryGetCached(IndirectReference reference, [NotNullWhen(true)] out ObjectToken? objectToken)
         {
             return cache.TryGetValue(reference, out objectToken);
         }
 
         public void Cache(ObjectToken objectToken, bool force = false)
         {
-            if (objectToken == null)
+            if (objectToken is null)
             {
                 throw new ArgumentNullException();
             }

@@ -1,10 +1,7 @@
 ﻿namespace UglyToad.PdfPig.Tests.Integration.VisualVerification
 {
-    using System;
-    using System.Drawing;
-    using System.IO;
     using PdfPig.Core;
-    using Xunit;
+    using SkiaSharp;
 
     public class GenerateLetterBoundingBoxImages
     {
@@ -19,6 +16,16 @@
         private const string SinglePage90ClockwiseRotation = "SinglePage90ClockwiseRotation - from PdfPig";
         private const string SinglePage180ClockwiseRotation = "SinglePage180ClockwiseRotation - from PdfPig";
         private const string SinglePage270ClockwiseRotation = "SinglePage270ClockwiseRotation - from PdfPig";
+        private const string SPARCv9ArchitectureManual = "SPARC - v9 Architecture Manual";
+        private const string CroppedAndRotatedFile = "cropped-and-rotated";
+        private const string MOZILLA_10372_2File = "MOZILLA-10372-2";
+        private const string Type3FontZeroHeight = "type3-font-zero-height";
+
+        private const string OutputPath = "Images";
+
+        private static readonly SKPaint violetPen = new SKPaint() { Color = SKColors.BlueViolet, StrokeWidth = 1 };
+        private static readonly SKPaint redPen = new SKPaint() { Color = SKColors.Crimson, StrokeWidth = 1 };
+        private static readonly SKPaint bluePen = new SKPaint() { Color = SKColors.GreenYellow, StrokeWidth = 1 };
         
         private static string GetFilename(string name)
         {
@@ -116,71 +123,104 @@
             Run(SinglePage270ClockwiseRotation, 595);
         }
 
-        private static void Run(string file, int imageHeight = 792)
+        [Fact]
+        public void SPARCv9ArchitectureManualTest()
+        {
+            Run(SPARCv9ArchitectureManual);
+        }
+
+        [Fact]
+        public void CroppedAndRotatedTest()
+        {
+            Run(CroppedAndRotatedFile, 205);
+        }
+
+        [Fact]
+        public void MOZILLA_10372_2Test()
+        {
+            Run(MOZILLA_10372_2File, 1584, 7);
+        }
+
+        [Fact]
+        public void Type3FontZeroHeightTest()
+        {
+            Run(Type3FontZeroHeight, 1255);
+        }
+
+        private static void Run(string file, int imageHeight = 792, int pageNo = 1)
         {
             var pdfFileName = GetFilename(file);
 
             using (var document = PdfDocument.Open(pdfFileName))
             using (var image = GetCorrespondingImage(pdfFileName))
             {
-                var page = document.GetPage(1);
+                var page = document.GetPage(pageNo);
 
-                var violetPen = new Pen(Color.BlueViolet, 1);
-                var redPen = new Pen(Color.Crimson, 1);
+                double scale = imageHeight / page.Height;
 
-                using (var bitmap = new Bitmap(image))
-                using (var graphics = Graphics.FromImage(bitmap))
+                using (var bitmap = SKBitmap.FromImage(image))
+                using (var graphics = new SKCanvas(bitmap))
                 {
                     foreach (var word in page.GetWords())
                     {
-                        DrawRectangle(word.BoundingBox, graphics, redPen, imageHeight);
+                        DrawRectangle(word.BoundingBox, graphics, redPen, imageHeight, scale);
                     }
 
                     foreach (var letter in page.Letters)
                     {
-                        DrawRectangle(letter.GlyphRectangle, graphics, violetPen, imageHeight);
+                        DrawRectangle(letter.GlyphRectangle, graphics, violetPen, imageHeight, scale);
                     }
+
+                    foreach (var annotation in page.ExperimentalAccess.GetAnnotations())
+                    {
+                        DrawRectangle(annotation.Rectangle, graphics, bluePen, imageHeight, scale);
+                    }
+
+                    graphics.Flush();
 
                     var imageName = $"{file}.jpg";
 
-                    if (!Directory.Exists("Images"))
+                    if (!Directory.Exists(OutputPath))
                     {
-                        Directory.CreateDirectory("Images");
+                        Directory.CreateDirectory(OutputPath);
                     }
 
-                    var savePath = Path.Combine("Images", imageName);
+                    var savePath = Path.Combine(OutputPath, imageName);
 
-                    bitmap.Save(savePath);
+                    using (var fs = new FileStream(savePath, FileMode.Create))
+                    using (SKData d = bitmap.Encode(SKEncodedImageFormat.Jpeg, 100))
+                    {
+                        d.SaveTo(fs);
+                    }
                 }
             }
         }
 
-        private static void DrawRectangle(PdfRectangle rectangle, Graphics graphics, Pen pen,
-            int imageHeight)
+        private static void DrawRectangle(PdfRectangle rectangle, SKCanvas graphics, SKPaint pen, int imageHeight, double scale)
         {
             int GetY(PdfPoint p)
             {
-                return imageHeight - (int) p.Y;
+                return imageHeight - (int)(p.Y * scale);
             }
 
-            Point GetPoint(PdfPoint p)
+            SKPoint GetPoint(PdfPoint p)
             {
-                return new Point((int)p.X, GetY(p));
+                return new SKPoint((int)(p.X * scale), GetY(p));
             }
 
-            graphics.DrawLine(pen, GetPoint(rectangle.BottomLeft), GetPoint(rectangle.BottomRight));
-            graphics.DrawLine(pen, GetPoint(rectangle.BottomRight), GetPoint(rectangle.TopRight));
-            graphics.DrawLine(pen, GetPoint(rectangle.TopRight), GetPoint(rectangle.TopLeft));
-            graphics.DrawLine(pen, GetPoint(rectangle.TopLeft), GetPoint(rectangle.BottomLeft));
+            graphics.DrawLine(GetPoint(rectangle.BottomLeft), GetPoint(rectangle.BottomRight), pen);
+            graphics.DrawLine(GetPoint(rectangle.BottomRight), GetPoint(rectangle.TopRight), pen);
+            graphics.DrawLine(GetPoint(rectangle.TopRight), GetPoint(rectangle.TopLeft), pen);
+            graphics.DrawLine(GetPoint(rectangle.TopLeft), GetPoint(rectangle.BottomLeft), pen);
         }
 
-        private static Image GetCorrespondingImage(string filename)
+        private static SKImage GetCorrespondingImage(string filename)
         {
             var pdf = GetFilename(filename);
 
             pdf = pdf.Replace(".pdf", ".jpg");
 
-            return Image.FromFile(pdf);
+            return SKImage.FromEncodedData(pdf);
         }
     }
 }

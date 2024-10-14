@@ -6,7 +6,7 @@ namespace UglyToad.PdfPig.Graphics.Colors
     /// <summary>
     /// A grayscale color with a single gray component.
     /// </summary>
-    public class GrayColor : IColor, IEquatable<GrayColor>
+    public sealed class GrayColor : IColor, IEquatable<GrayColor>
     {
         /// <summary>
         /// Gray Black value (0).
@@ -24,38 +24,42 @@ namespace UglyToad.PdfPig.Graphics.Colors
         /// <summary>
         /// The gray value between 0 and 1.
         /// </summary>
-        public decimal Gray { get; }
+        public double Gray { get; }
 
         /// <summary>
         /// Create a new <see cref="GrayColor"/>.
         /// </summary>
-        public GrayColor(decimal gray)
+        public GrayColor(double gray)
         {
             Gray = gray;
         }
 
         /// <inheritdoc/>
-        public (decimal r, decimal g, decimal b) ToRGBValues()
+        public (double r, double g, double b) ToRGBValues()
         {
             return (Gray, Gray, Gray);
         }
 
         /// <inheritdoc />
-        public override bool Equals(object obj)
+        public override bool Equals(object? obj)
         {
-            return Equals(obj as GrayColor);
+            return obj is GrayColor other && Equals(other);
         }
 
         /// <inheritdoc />
-        public bool Equals(GrayColor other)
+        public bool Equals(GrayColor? other)
         {
-            return other != null &&
-                   Gray == other.Gray;
+            if (other is null)
+            {
+                return this is null;
+            }
+
+            return Gray == other.Gray;
         }
 
         /// <inheritdoc />
         public override int GetHashCode() => Gray.GetHashCode();
-        
+
         /// <summary>
         /// Equals.
         /// </summary>

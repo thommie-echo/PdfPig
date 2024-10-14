@@ -1,7 +1,7 @@
 ﻿namespace UglyToad.PdfPig.Tests.Graphics
 {
-    using System.Collections.Generic;
     using Content;
+    using Logging;
     using PdfFonts;
     using PdfPig.Graphics;
     using PdfPig.Tokens;
@@ -26,15 +26,25 @@
 
         public PdfPath CurrentPath { get; set; }
 
-        public IColorSpaceContext ColorSpaceContext { get; }
-
         public PdfPoint CurrentPosition { get; set; }
 
         public TestOperationContext()
         {
-            StateStack.Push(new CurrentGraphicsState());
+            StateStack.Push(new CurrentGraphicsState()
+            {
+                ColorSpaceContext = new ColorSpaceContext(GetCurrentState,
+                    new ResourceStore(new TestPdfTokenScanner(),
+                        new TestFontFactory(),
+                        new TestFilterProvider(),
+                        new ParsingOptions()
+                        {
+                            UseLenientParsing = true,
+                            ClipPaths = false,
+                            SkipMissingFonts = true,
+                            Logger = new NoOpLog()
+                        }))
+            });
             CurrentSubpath = new PdfSubpath();
-            ColorSpaceContext = new ColorSpaceContext(GetCurrentState, new ResourceStore(new TestPdfTokenScanner(), new TestFontFactory()));
         }
 
         public CurrentGraphicsState GetCurrentState()
@@ -170,7 +180,7 @@
         {
         }
 
-        public void EndInlineImage(IReadOnlyList<byte> bytes)
+        public void EndInlineImage(ReadOnlyMemory<byte> bytes)
         {
         }
 
@@ -192,7 +202,7 @@
             TextMatrices.TextMatrix = matrix.Multiply(TextMatrices.TextMatrix);
         }
 
-        public void SetFlatnessTolerance(decimal tolerance)
+        public void SetFlatnessTolerance(double tolerance)
         {
             GetCurrentState().Flatness = tolerance;
         }
@@ -212,19 +222,19 @@
             GetCurrentState().JoinStyle = join;
         }
 
-        public void SetLineWidth(decimal width)
+        public void SetLineWidth(double width)
         {
             GetCurrentState().LineWidth = width;
         }
 
-        public void SetMiterLimit(decimal limit)
+        public void SetMiterLimit(double limit)
         {
             GetCurrentState().MiterLimit = limit;
         }
 
         public void MoveToNextLineWithOffset()
         {
-            var tdOperation = new MoveToNextLineWithOffset(0, -1 * (decimal)GetCurrentState().FontState.Leading);
+            var tdOperation = new MoveToNextLineWithOffset(0, -1 * GetCurrentState().FontState.Leading);
             tdOperation.Run(this);
         }
 
@@ -269,6 +279,11 @@
         public void SetCharacterSpacing(double spacing)
         {
             GetCurrentState().FontState.CharacterSpacing = spacing;
+        }
+
+        public void PaintShading(NameToken shading)
+        {
+
         }
 
         private class TestFontFactory : IFontFactory

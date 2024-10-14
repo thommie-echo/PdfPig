@@ -1,8 +1,4 @@
-﻿using System;
-using UglyToad.PdfPig.Tokens;
-using Xunit;
-
-namespace UglyToad.PdfPig.Tests.Integration
+﻿namespace UglyToad.PdfPig.Tests.Integration
 {
     public class OptionalContentTests
     {
@@ -14,7 +10,7 @@ namespace UglyToad.PdfPig.Tests.Integration
                 var page = document.GetPage(1);
                 var oc = page.ExperimentalAccess.GetOptionalContents();
 
-                Assert.Equal(0, oc.Count);
+                Assert.Empty(oc);
             }
         }
 
@@ -32,9 +28,9 @@ namespace UglyToad.PdfPig.Tests.Integration
                 Assert.Contains("Dimentions", oc);
                 Assert.Contains("Text", oc);
 
-                Assert.Equal(1, oc["0"].Count);
+                Assert.Single(oc["0"]);
                 Assert.Equal(2, oc["Dimentions"].Count);
-                Assert.Equal(1, oc["Text"].Count);
+                Assert.Single(oc["Text"]);
             }
         }
 

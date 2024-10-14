@@ -2,7 +2,6 @@
 {
     using Alto;
     using Content;
-    using Core;
     using DocumentLayoutAnalysis;
     using System;
     using System.Globalization;
@@ -17,11 +16,11 @@
     /// Alto 4.1 (XML) text exporter.
     /// <para>See https://github.com/altoxml/schema </para>
     /// </summary>
-    public class AltoXmlTextExporter : ITextExporter
+    public sealed class AltoXmlTextExporter : ITextExporter
     {
         private readonly IPageSegmenter pageSegmenter;
         private readonly IWordExtractor wordExtractor;
-
+        private readonly Func<string, string> invalidCharacterHandler;
         private readonly double scale;
         private readonly string indentChar;
 
@@ -34,6 +33,9 @@
         private int stringCount;
         private int glyphCount;
 
+        /// <inheritdoc/>
+        public InvalidCharStrategy InvalidCharStrategy { get; }
+
         /// <summary>
         /// Alto 4.1 (XML).
         /// <para>See https://github.com/altoxml/schema </para>
@@ -41,13 +43,50 @@
         /// <param name="wordExtractor">Extractor used to identify words in the document.</param>
         /// <param name="pageSegmenter">Segmenter used to split page into blocks.</param>
         /// <param name="scale">Scale multiplier to apply to output document, defaults to 1.</param>
-        /// <param name="indent">Character to use for indentation, defaults to tab.</param>
-        public AltoXmlTextExporter(IWordExtractor wordExtractor, IPageSegmenter pageSegmenter, double scale = 1, string indent = "\t")
+        /// <param name="indentChar">Character to use for indentation, defaults to tab.</param>
+        /// <param name="invalidCharacterHandler">How to handle invalid characters.</param>
+        public AltoXmlTextExporter(IWordExtractor wordExtractor, IPageSegmenter pageSegmenter,
+                                   double scale, string indentChar,
+                                   Func<string, string> invalidCharacterHandler)
+            : this(wordExtractor, pageSegmenter, scale, indentChar,
+                  InvalidCharStrategy.Custom, invalidCharacterHandler)
+        { }
+
+        /// <summary>
+        /// Alto 4.1 (XML).
+        /// <para>See https://github.com/altoxml/schema </para>
+        /// </summary>
+        /// <param name="wordExtractor">Extractor used to identify words in the document.</param>
+        /// <param name="pageSegmenter">Segmenter used to split page into blocks.</param>
+        /// <param name="scale">Scale multiplier to apply to output document, defaults to 1.</param>
+        /// <param name="indentChar">Character to use for indentation, defaults to tab.</param>
+        /// <param name="invalidCharacterStrategy">How to handle invalid characters.</param>
+        public AltoXmlTextExporter(IWordExtractor wordExtractor, IPageSegmenter pageSegmenter,
+                                   double scale = 1, string indentChar = "\t",
+                                   InvalidCharStrategy invalidCharacterStrategy = InvalidCharStrategy.DoNotCheck)
+             : this(wordExtractor, pageSegmenter, scale, indentChar,
+                  invalidCharacterStrategy, null)
+        { }
+
+        private AltoXmlTextExporter(IWordExtractor wordExtractor, IPageSegmenter pageSegmenter,
+                           double scale, string indentChar,
+                           InvalidCharStrategy invalidCharacterStrategy,
+                           Func<string, string> invalidCharacterHandler)
         {
-            this.wordExtractor = wordExtractor ?? throw new ArgumentNullException(nameof(wordExtractor));
-            this.pageSegmenter = pageSegmenter ?? throw new ArgumentNullException(nameof(pageSegmenter));
+            this.wordExtractor = wordExtractor;
+            this.pageSegmenter = pageSegmenter;
             this.scale = scale;
-            indentChar = indent ?? string.Empty;
+            this.indentChar = indentChar ?? string.Empty;
+            InvalidCharStrategy = invalidCharacterStrategy;
+
+            if (invalidCharacterHandler is null)
+            {
+                this.invalidCharacterHandler = TextExporterHelper.GetXmlInvalidCharHandler(InvalidCharStrategy);
+            }
+            else
+            {
+                this.invalidCharacterHandler = invalidCharacterHandler;
+            }
         }
 
         /// <summary>
@@ -58,10 +97,7 @@
         public string Get(PdfDocument document, bool includePaths = false)
         {
             var altoDocument = CreateAltoDocument("unknown");
-            var altoPages = document.GetPages().Select(x => ToAltoPage(x, includePaths)).ToArray();
-
-            altoDocument.Layout.Pages = altoPages;
-
+            altoDocument.Layout.Pages = document.GetPages().Select(x => ToAltoPage(x, includePaths)).ToArray();
             return Serialize(altoDocument);
         }
 
@@ -129,8 +165,8 @@
                 {
                     Height = (float)Math.Round(page.Height * scale),    // TBD
                     Width = (float)Math.Round(page.Width * scale),      // TBD
-                    VerticalPosition = 0f,                                          // TBD
-                    HorizontalPosition = 0f,                                          // TBD
+                    VerticalPosition = 0f,                              // TBD
+                    HorizontalPosition = 0f,                            // TBD
                     ComposedBlocks = null,                              // TBD
                     GraphicalElements = null,                           // TBD
                     Illustrations = null,                               // TBD
@@ -142,12 +178,10 @@
             };
 
             var words = page.GetWords(wordExtractor);
-            var blocks = pageSegmenter.GetBlocks(words).Select(b => ToAltoTextBlock(b, page.Height)).ToArray();
-
-            altoPage.PrintSpace.TextBlock = blocks;
+            altoPage.PrintSpace.TextBlock = pageSegmenter.GetBlocks(words).Select(b => ToAltoTextBlock(b, page.Height)).ToArray();
 
             altoPage.PrintSpace.Illustrations = page.GetImages().Select(i => ToAltoIllustration(i, page.Height)).ToArray();
-            
+
             if (includePaths)
             {
                 altoPage.PrintSpace.GraphicalElements = page.ExperimentalAccess.Paths
@@ -223,7 +257,6 @@
         {
             textLineCount++;
             var strings = textLine.Words
-                .Where(x => x.Text.All(XmlConvert.IsXmlChar))
                 .Select(w => ToAltoString(w, height)).ToArray();
 
             return new AltoDocument.AltoTextBlockTextLine
@@ -253,7 +286,7 @@
                 Width = (float)Math.Round(word.BoundingBox.Width * scale),
                 Glyph = glyphs,
                 Cc = string.Join("", glyphs.Select(g => 9f * (1f - g.Gc))), // from 0->1 to 9->0
-                Content = word.Text,
+                Content = invalidCharacterHandler(word.Text),
                 Language = null,
                 StyleRefs = null,
                 SubsContent = null,
@@ -273,7 +306,7 @@
                 Height = (float)Math.Round(letter.GlyphRectangle.Height * scale),
                 Width = (float)Math.Round(letter.GlyphRectangle.Width * scale),
                 Gc = 1.0f,
-                Content = letter.Value,
+                Content = invalidCharacterHandler(letter.Value),
                 Id = "P" + pageCount + "_ST" + stringCount.ToString("#00000") + "_G" + glyphCount.ToString("#00")
             };
         }
@@ -288,7 +321,7 @@
                 ProcessingSoftware = new AltoDocument.AltoProcessingSoftware
                 {
                     SoftwareName = "PdfPig",
-                    SoftwareCreator = @"https://github.com/UglyToad/PdfPig",
+                    SoftwareCreator = "https://github.com/UglyToad/PdfPig",
                     ApplicationDescription = "Read and extract text and other content from PDFs in C# (port of PdfBox)",
                     SoftwareVersion = "x.x.xx"
                 },
@@ -315,8 +348,8 @@
                 Processings = new[] { processing },
                 SourceImageInformation = new AltoDocument.AltoSourceImageInformation
                 {
-                    DocumentIdentifiers = new [] { documentIdentifier },
-                    FileIdentifiers = new [] { fileIdentifier },
+                    DocumentIdentifiers = new[] { documentIdentifier },
+                    FileIdentifiers = new[] { fileIdentifier },
                     FileName = fileName
                 }
             };
@@ -330,6 +363,7 @@
                 Encoding = System.Text.Encoding.UTF8,
                 Indent = true,
                 IndentChars = indentChar,
+                CheckCharacters = InvalidCharStrategy != InvalidCharStrategy.DoNotCheck,
             };
 
             using (var memoryStream = new System.IO.MemoryStream())
@@ -347,7 +381,12 @@
         {
             var serializer = new XmlSerializer(typeof(AltoDocument));
 
-            using (var reader = XmlReader.Create(xmlPath))
+            var settings = new XmlReaderSettings()
+            {
+                CheckCharacters = false
+            };
+
+            using (var reader = XmlReader.Create(xmlPath, settings))
             {
                 return (AltoDocument)serializer.Deserialize(reader);
             }

@@ -10,22 +10,23 @@
     /// </summary>
     public class CoreTokenScanner : ISeekableTokenScanner
     {
-        private static readonly ArrayTokenizer ArrayTokenizer = new ArrayTokenizer();
         private static readonly CommentTokenizer CommentTokenizer = new CommentTokenizer();
-        private static readonly DictionaryTokenizer DictionaryTokenizer = new DictionaryTokenizer();
         private static readonly HexTokenizer HexTokenizer = new HexTokenizer();
         private static readonly NameTokenizer NameTokenizer = new NameTokenizer();
+        private static readonly PlainTokenizer PlainTokenizer = new PlainTokenizer();
+        private static readonly NumericTokenizer NumericTokenizer = new NumericTokenizer();
 
-        // NOTE: these are not thread safe so should not be static. Each instance includes a
-        // StringBuilder it re-uses.
-        private readonly PlainTokenizer PlainTokenizer = new PlainTokenizer();
-        private readonly NumericTokenizer NumericTokenizer = new NumericTokenizer();
-        private readonly StringTokenizer StringTokenizer = new StringTokenizer();
+        private readonly StringTokenizer stringTokenizer;
+        private readonly ArrayTokenizer arrayTokenizer;
+        private readonly DictionaryTokenizer dictionaryTokenizer;
 
         private readonly ScannerScope scope;
+        private readonly IReadOnlyDictionary<NameToken, IReadOnlyList<NameToken>> namedDictionaryRequiredKeys;
         private readonly IInputBytes inputBytes;
+        private readonly bool usePdfDocEncoding;
         private readonly List<(byte firstByte, ITokenizer tokenizer)> customTokenizers = new List<(byte, ITokenizer)>();
-        
+        private readonly bool useLenientParsing;
+
         /// <summary>
         /// The offset in the input data at which the <see cref="CurrentToken"/> starts.
         /// </summary>
@@ -46,10 +47,21 @@
         /// <summary>
         /// Create a new <see cref="CoreTokenScanner"/> from the input.
         /// </summary>
-        public CoreTokenScanner(IInputBytes inputBytes, ScannerScope scope = ScannerScope.None)
+        public CoreTokenScanner(
+            IInputBytes inputBytes,
+            bool usePdfDocEncoding,
+            ScannerScope scope = ScannerScope.None,
+            IReadOnlyDictionary<NameToken, IReadOnlyList<NameToken>> namedDictionaryRequiredKeys = null,
+            bool useLenientParsing = false)
         {
-            this.scope = scope;
             this.inputBytes = inputBytes ?? throw new ArgumentNullException(nameof(inputBytes));
+            this.usePdfDocEncoding = usePdfDocEncoding;
+            this.stringTokenizer = new StringTokenizer(usePdfDocEncoding);
+            this.arrayTokenizer = new ArrayTokenizer(usePdfDocEncoding);
+            this.dictionaryTokenizer = new DictionaryTokenizer(usePdfDocEncoding, useLenientParsing: useLenientParsing);
+            this.scope = scope;
+            this.namedDictionaryRequiredKeys = namedDictionaryRequiredKeys;
+            this.useLenientParsing = useLenientParsing;
         }
 
         /// <inheritdoc />
@@ -116,14 +128,21 @@
                     switch (c)
                     {
                         case '(':
-                            tokenizer = StringTokenizer;
+                            tokenizer = stringTokenizer;
                             break;
                         case '<':
                             var following = inputBytes.Peek();
                             if (following == '<')
                             {
                                 isSkippingSymbol = true;
-                                tokenizer = DictionaryTokenizer;
+                                tokenizer = dictionaryTokenizer;
+
+                                if (namedDictionaryRequiredKeys != null
+                                    && CurrentToken is NameToken name
+                                    && namedDictionaryRequiredKeys.TryGetValue(name, out var requiredKeys))
+                                {
+                                    tokenizer = new DictionaryTokenizer(usePdfDocEncoding, requiredKeys, useLenientParsing);
+                                }
                             }
                             else
                             {
@@ -138,7 +157,7 @@
                             }
                             break;
                         case '[':
-                            tokenizer = ArrayTokenizer;
+                            tokenizer = arrayTokenizer;
                             break;
                         case ']' when scope == ScannerScope.Array:
                             return false;
@@ -189,7 +208,7 @@
                         // Special case handling for inline images.
                         var imageData = ReadInlineImageData();
                         isInInlineImage = false;
-                        CurrentToken = new InlineImageDataToken(imageData);
+                        CurrentToken = new InlineImageDataToken(new ReadOnlyMemory<byte>([..imageData]));
                         hasBytePreRead = false;
                         return true;
                     }
@@ -266,7 +285,7 @@
             return data;
         }
 
-        private IReadOnlyList<byte> ReadInlineImageData()
+        private List<byte> ReadInlineImageData()
         {
             // The ID operator should be followed by a single white-space character, and the next character is interpreted
             // as the first byte of image data. 
@@ -284,7 +303,6 @@
         {
             const byte lastPlainText = 127;
             const byte space = 32;
-
 
             var imageData = new List<byte>();
             byte prevByte = 0;

@@ -7,6 +7,7 @@
     using Fonts.Encodings;
     using PdfPig.Parser.Parts;
     using Simple;
+    using System;
     using Tokenization.Scanner;
     using Tokens;
     using Util;
@@ -31,34 +32,39 @@
 
             var fontMatrix = GetFontMatrix(dictionary);
 
+            if (boundingBox.Left == 0 && boundingBox.Bottom == 0 && boundingBox.Height == 0 && boundingBox.Width == 0 
+                && fontMatrix.A != 0 && fontMatrix.D != 0)
+            {
+                boundingBox = new PdfRectangle(0, 0, 1 / fontMatrix.A, 1 / fontMatrix.D);
+            }
+
             var firstCharacter = FontDictionaryAccessHelper.GetFirstCharacter(dictionary);
             var lastCharacter = FontDictionaryAccessHelper.GetLastCharacter(dictionary);
             var widths = FontDictionaryAccessHelper.GetWidths(scanner, dictionary);
             
-            Encoding encoding = encodingReader.Read(dictionary);
+            Encoding? encoding = encodingReader.Read(dictionary);
 
-            CMap toUnicodeCMap = null;
+            CMap? toUnicodeCMap = null;
             if (dictionary.TryGet(NameToken.ToUnicode, out var toUnicodeObj))
             {
                 var toUnicode = DirectObjectFinder.Get<StreamToken>(toUnicodeObj, scanner);
 
-                var decodedUnicodeCMap = toUnicode?.Decode(filterProvider, scanner);
-
-                if (decodedUnicodeCMap != null)
+                if (toUnicode?.Decode(filterProvider, scanner) is ReadOnlyMemory<byte> decodedUnicodeCMap)
                 {
-                    toUnicodeCMap = CMapCache.Parse(new ByteArrayInputBytes(decodedUnicodeCMap));
+                    toUnicodeCMap = CMapCache.Parse(new MemoryInputBytes(decodedUnicodeCMap));
                 }
             }
 
             var name = GetFontName(dictionary);
 
-            return new Type3Font(name, boundingBox, fontMatrix, encoding, firstCharacter,
-                lastCharacter, widths, toUnicodeCMap);
+            return new Type3Font(name, boundingBox, fontMatrix, encoding!,
+                firstCharacter,
+                lastCharacter, widths, toUnicodeCMap!);
         }
 
         private NameToken GetFontName(DictionaryToken dictionary)
         {
-            if (dictionary.TryGet(NameToken.Name, scanner, out NameToken fontName))
+            if (dictionary.TryGet(NameToken.Name, scanner, out NameToken? fontName))
             {
                 return fontName;
             }

@@ -1,13 +1,14 @@
 ﻿namespace UglyToad.PdfPig.Parser.FileStructure
 {
     using System;
+    using System.Diagnostics.CodeAnalysis;
     using System.Globalization;
     using Content;
     using Core;
     using Logging;
     using Tokenization.Scanner;
     using Tokens;
-    using Util.JetBrains.Annotations;
+    using UglyToad.PdfPig.Util;
 
     /// <summary>
     /// Used to retrieve the version header from the PDF file.
@@ -24,53 +25,53 @@
     /// %PDF–1.6
     /// %PDF–1.7
     /// This parser allows versions up to 1.9.
-    /// For versions equal or greater to PDF 1.4, the optional Version entry in the document’s catalog dictionary should be used instead of the header version.
+    /// For versions equal or greater to PDF 1.4, the optional Version entry in the document's catalog dictionary should be used instead of the header version.
     /// </remarks>
     internal static class FileHeaderParser
     {
-        [NotNull]
-        public static HeaderVersion Parse([NotNull]ISeekableTokenScanner scanner, bool isLenientParsing, ILog log)
+        public static HeaderVersion Parse(ISeekableTokenScanner scanner, IInputBytes inputBytes, bool isLenientParsing, ILog log)
         {
-            if (scanner == null)
+            if (scanner is null)
             {
                 throw new ArgumentNullException(nameof(scanner));
             }
 
-            // Read the first token
-            if (!scanner.MoveNext())
-            {
-                throw new PdfDocumentFormatException($"Could not read the first token in the document at position {scanner.CurrentPosition}.");
-            }
+            var startPosition = scanner.CurrentPosition;
 
-            var comment = scanner.CurrentToken as CommentToken;
-
-            const int junkTokensTolerance = 25;
+            const int junkTokensTolerance = 30;
             var attempts = 0;
-            while (comment == null)
+            CommentToken? comment;
+            do
             {
-                if (attempts == junkTokensTolerance)
+                if (attempts == junkTokensTolerance || !scanner.MoveNext())
                 {
-                    throw new PdfDocumentFormatException("Could not find the version header comment at the start of the document.");
-                }
+                    if (!TryBruteForceVersionLocation(startPosition, inputBytes, out var version))
+                    {
+                        throw new PdfDocumentFormatException("Could not find the version header comment at the start of the document.");
+                    }
 
-                if (!scanner.MoveNext())
-                {
-                    throw new PdfDocumentFormatException("Could not find the version header comment at the start of the document.");
+                    scanner.Seek(startPosition);
+                    return version;
                 }
 
                 comment = scanner.CurrentToken as CommentToken;
 
                 attempts++;
-            }
+            } while (comment is null);
 
+            return GetHeaderVersionAndResetScanner(comment, scanner, isLenientParsing, log);
+        }
+
+        private static HeaderVersion GetHeaderVersionAndResetScanner(CommentToken comment, ISeekableTokenScanner scanner, bool isLenientParsing, ILog log)
+        {
             if (comment.Data.IndexOf("PDF-1.", StringComparison.OrdinalIgnoreCase) != 0 && comment.Data.IndexOf("FDF-1.", StringComparison.OrdinalIgnoreCase) != 0)
             {
                 return HandleMissingVersion(comment, isLenientParsing, log);
             }
 
-            const int toDecimalStartLength = 4;
+            const int toDoubleStartLength = 4;
 
-            if (!decimal.TryParse(comment.Data.Substring(toDecimalStartLength), 
+            if (!double.TryParse(comment.Data.AsSpanOrSubstring(toDoubleStartLength),
                 NumberStyles.Number,
                 CultureInfo.InvariantCulture,
                 out var version))
@@ -90,13 +91,68 @@
             return result;
         }
 
+        private static bool TryBruteForceVersionLocation(long startPosition, IInputBytes inputBytes, [NotNullWhen(true)] out HeaderVersion? headerVersion)
+        {
+            headerVersion = null;
+
+            inputBytes.Seek(startPosition);
+
+            // %PDF-x.y or %FDF-x.y
+            const int versionLength = 8;
+            const int bufferLength = 64;
+
+            // Slide a window of bufferLength bytes across the file allowing for the fact the version could get split by
+            // the window (so always ensure an overlap of versionLength bytes between the end of the previous and start of the next buffer).
+            Span<byte> buffer = stackalloc byte[bufferLength];
+
+            var currentOffset = startPosition;
+            int readLength;
+            do
+            {
+                readLength = inputBytes.Read(buffer);
+
+                var content = OtherEncodings.BytesAsLatin1String(buffer);
+
+                var pdfIndex = content.IndexOf("%PDF-", StringComparison.OrdinalIgnoreCase);
+                var fdfIndex = content.IndexOf("%FDF-", StringComparison.OrdinalIgnoreCase);
+                var actualIndex = pdfIndex >= 0 ? pdfIndex : fdfIndex;
+
+                if (actualIndex >= 0 && content.Length - actualIndex >= versionLength)
+                {
+                    var numberPart = content.AsSpanOrSubstring(actualIndex + 5, 3);
+                    if (double.TryParse(
+                            numberPart,
+                            NumberStyles.Number,
+                            CultureInfo.InvariantCulture,
+                            out var version))
+                    {
+                        var afterCommentSymbolIndex = actualIndex + 1;
+
+                        headerVersion = new HeaderVersion(
+                            version,
+                            content.Substring(afterCommentSymbolIndex, versionLength - 1),
+                            currentOffset + actualIndex);
+
+                        inputBytes.Seek(startPosition);
+
+                        return true;
+                    }
+                }
+
+                currentOffset += readLength - versionLength;
+                inputBytes.Seek(currentOffset);
+            } while (readLength == bufferLength);
+
+            return false;
+        }
+
         private static HeaderVersion HandleMissingVersion(CommentToken comment, bool isLenientParsing, ILog log)
         {
             if (isLenientParsing)
             {
                 log.Warn($"Did not find a version header of the correct format, defaulting to 1.4 since lenient. Header was: {comment.Data}.");
 
-                return new HeaderVersion(1.4m, "PDF-1.4", 0);
+                return new HeaderVersion(1.4, "PDF-1.4", 0);
             }
 
             throw new PdfDocumentFormatException($"The comment which should have provided the version was in the wrong format: {comment.Data}.");

@@ -1,11 +1,12 @@
 ﻿namespace UglyToad.PdfPig.Core
 {
+    using System;
     using System.Diagnostics;
 
     /// <summary>
     /// Used to uniquely identify and refer to objects in the PDF file.
     /// </summary>
-    public struct IndirectReference
+    public readonly struct IndirectReference
     {
         /// <summary>
         /// A positive integer object number.
@@ -44,14 +45,7 @@
         /// <inheritdoc />
         public override int GetHashCode()
         {
-            unchecked
-            {
-                int hash = 59;
-                hash = hash * 97 + ObjectNumber.GetHashCode();
-                hash = hash * 97 + Generation.GetHashCode();
-
-                return hash;
-            }
+            return HashCode.Combine(ObjectNumber, Generation);
         }
 
         /// <inheritdoc />

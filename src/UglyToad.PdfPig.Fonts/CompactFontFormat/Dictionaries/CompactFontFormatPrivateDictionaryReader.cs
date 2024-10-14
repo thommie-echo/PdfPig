@@ -5,7 +5,7 @@
 
     internal class CompactFontFormatPrivateDictionaryReader : CompactFontFormatDictionaryReader<CompactFontFormatPrivateDictionary, CompactFontFormatPrivateDictionary.Builder>
     {
-        public override CompactFontFormatPrivateDictionary Read(CompactFontFormatData data, IReadOnlyList<string> stringIndex)
+        public override CompactFontFormatPrivateDictionary Read(CompactFontFormatData data, ReadOnlySpan<string> stringIndex)
         {
             var builder = new CompactFontFormatPrivateDictionary.Builder();
 
@@ -14,7 +14,7 @@
             return builder.Build();
         }
 
-        protected override void ApplyOperation(CompactFontFormatPrivateDictionary.Builder dictionary, List<Operand> operands, OperandKey operandKey, IReadOnlyList<string> stringIndex)
+        protected override void ApplyOperation(CompactFontFormatPrivateDictionary.Builder dictionary, List<Operand> operands, OperandKey operandKey, ReadOnlySpan<string> stringIndex)
         {
             switch (operandKey.Byte0)
             {
@@ -31,10 +31,10 @@
                     dictionary.FamilyOtherBlues = ReadDeltaToIntArray(operands);
                     break;
                 case 10:
-                    dictionary.StandardHorizontalWidth = operands[0].Decimal;
+                    dictionary.StandardHorizontalWidth = operands[0].Double;
                     break;
                 case 11:
-                    dictionary.StandardVerticalWidth = operands[0].Decimal;
+                    dictionary.StandardVerticalWidth = operands[0].Double;
                     break;
                 case 12:
                 {
@@ -46,7 +46,7 @@
                     switch (operandKey.Byte1.Value)
                     {
                         case 9:
-                            dictionary.BlueScale = operands[0].Decimal;
+                            dictionary.BlueScale = operands[0].Double;
                             break;
                         case 10:
                             dictionary.BlueShift = operands[0].Int;
@@ -61,16 +61,16 @@
                             dictionary.StemSnapVerticalWidths = ReadDeltaToArray(operands);
                             break;
                         case 14:
-                            dictionary.ForceBold = operands[0].Decimal == 1;
+                            dictionary.ForceBold = operands[0].Double == 1;
                             break;
                         case 17:
                             dictionary.LanguageGroup = operands[0].Int;
                             break;
                         case 18:
-                            dictionary.ExpansionFactor = operands[0].Decimal;
+                            dictionary.ExpansionFactor = operands[0].Double;
                             break;
                         case 19:
-                            dictionary.InitialRandomSeed = operands[0].Decimal;
+                            dictionary.InitialRandomSeed = operands[0].Double;
                             break;
                     }
                 }
@@ -79,10 +79,10 @@
                     dictionary.LocalSubroutineOffset = GetIntOrDefault(operands, -1);
                     break;
                 case 20:
-                    dictionary.DefaultWidthX = operands[0].Decimal;
+                    dictionary.DefaultWidthX = operands[0].Double;
                     break;
                 case 21:
-                    dictionary.NominalWidthX = operands[0].Decimal;
+                    dictionary.NominalWidthX = operands[0].Double;
                     break;
             }
         }

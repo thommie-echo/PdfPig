@@ -3,7 +3,6 @@
     using PdfFonts.Cmap;
     using PdfFonts.Parser.Parts;
     using PdfPig.Tokens;
-    using Xunit;
 
     public class BaseFontRangeParserTests
     {
@@ -16,7 +15,7 @@
 
             var builder = new CharacterMapBuilder();
 
-            parser.Parse(new NumericToken(1), input, builder);
+            parser.Parse(new NumericToken(1), input.scanner, builder);
 
             Assert.Equal(2, builder.BaseFontCharacterMap.Count);
 
@@ -31,7 +30,7 @@
 
             var builder = new CharacterMapBuilder();
 
-            parser.Parse(new NumericToken(1), input, builder);
+            parser.Parse(new NumericToken(1), input.scanner, builder);
 
             Assert.Equal(7, builder.BaseFontCharacterMap.Count);
 
@@ -47,7 +46,7 @@
 
             var builder = new CharacterMapBuilder();
 
-            parser.Parse(new NumericToken(2), input, builder);
+            parser.Parse(new NumericToken(2), input.scanner, builder);
 
             Assert.Equal(6, builder.BaseFontCharacterMap.Count);
 

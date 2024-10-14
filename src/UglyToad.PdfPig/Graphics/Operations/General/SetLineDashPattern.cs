@@ -21,11 +21,11 @@
         /// The line dash pattern.
         /// </summary>
         public LineDashPattern Pattern { get; }
-        
+
         /// <summary>
         /// Create a new <see cref="SetLineDashPattern"/>.
         /// </summary>
-        public SetLineDashPattern(decimal[] array, int phase)
+        public SetLineDashPattern(double[] array, int phase)
         {
             Pattern = new LineDashPattern(phase, array);
         }
@@ -39,12 +39,12 @@
         /// <inheritdoc />
         public void Write(Stream stream)
         {
-            stream.WriteText("[");
+            stream.WriteText("["u8);
 
             for (var i = 0; i < Pattern.Array.Count; i++)
             {
                 var value = Pattern.Array[i];
-                stream.WriteDecimal(value);
+                stream.WriteDouble(value);
 
                 if (i < Pattern.Array.Count - 1)
                 {
@@ -52,11 +52,11 @@
                 }
             }
 
-            stream.WriteText("]");
+            stream.WriteText("]"u8);
 
             stream.WriteWhiteSpace();
 
-            stream.WriteDecimal(Pattern.Phase);
+            stream.WriteDouble(Pattern.Phase);
 
             stream.WriteWhiteSpace();
 

@@ -1,12 +1,12 @@
 ﻿namespace UglyToad.PdfPig.Fonts.CompactFontFormat
 {
-    using System;
-    using System.Collections.Generic;
     using Charsets;
     using CharStrings;
     using Core;
     using Dictionaries;
     using Encodings;
+    using System;
+    using System.Collections.Generic;
     using Type1.CharStrings;
 
     /// <summary>
@@ -27,7 +27,7 @@
         /// <summary>
         /// The font matrix for this font.
         /// </summary>
-        public TransformationMatrix FontMatrix => TopDictionary.FontMatrix;
+        public TransformationMatrix FontMatrix => TopDictionary.FontMatrix.HasValue ? TopDictionary.FontMatrix.Value : TransformationMatrix.FromValues(0.001, 0, 0, 0.001, 0, 0);
 
         /// <summary>
         /// The value of Weight from the top dictionary or <see langword="null"/>.
@@ -37,7 +37,7 @@
         /// <summary>
         /// The value of Italic Angle from the top dictionary or 0.
         /// </summary>
-        public decimal ItalicAngle => TopDictionary?.ItalicAngle ?? 0;
+        public double ItalicAngle => TopDictionary?.ItalicAngle ?? 0.0;
 
         internal CompactFontFormatFont(CompactFontFormatTopLevelDictionary topDictionary, CompactFontFormatPrivateDictionary privateDictionary,
             ICompactFontFormatCharset charset,
@@ -48,6 +48,32 @@
             Charset = charset;
             CharStrings = charStrings;
             Encoding = fontEncoding;
+        }
+
+        /// <summary>
+        /// Get the character name. Returns <c>null</c> if cannot be processed.
+        /// </summary>
+        public string GetCharacterName(int characterCode, bool isCid)
+        {
+            if (Encoding != null)
+            {
+                return Encoding.GetName(characterCode);
+            }
+
+            if (Charset.IsCidCharset || isCid)
+            {
+                return Charset?.GetNameByStringId(characterCode);
+            }
+
+            string characterName = GlyphList.AdobeGlyphList.UnicodeCodePointToName(characterCode);
+
+            if (characterName.Equals(GlyphList.NotDefined, StringComparison.OrdinalIgnoreCase))
+            {
+                // BobLD: Not tested
+                return Charset?.GetNameByStringId(characterCode);
+            }
+
+            return characterName;
         }
 
         /// <summary>
@@ -69,7 +95,7 @@
             }
 
             var glyph = type2CharStrings.Generate(characterName, (double)defaultWidthX, (double)nominalWidthX);
-            var rectangle = glyph.Path.GetBoundingRectangle();
+            var rectangle = PdfSubpath.GetBoundingRectangle(glyph.Path);
             if (rectangle.HasValue)
             {
                 return rectangle;
@@ -77,13 +103,61 @@
 
             var defaultBoundingBox = TopDictionary.FontBoundingBox;
             return new PdfRectangle(0, 0, glyph.Width.GetValueOrDefault(), defaultBoundingBox.Height);
+        }
 
+        /// <summary>
+        /// Get the pdfpath for the character with the given name.
+        /// </summary>
+        /// <param name="characterName"></param>
+        /// <param name="path"></param>
+        /// <returns></returns>
+        public bool TryGetPath(string characterName, out IReadOnlyList<PdfSubpath> path)
+        {
+            var defaultWidthX = GetDefaultWidthX(characterName);
+            var nominalWidthX = GetNominalWidthX(characterName);
+
+            if (CharStrings.TryGetFirst(out var _))
+            {
+                throw new NotImplementedException("Type 1 CharStrings in a CFF font are currently unsupported.");
+            }
+
+            if (!CharStrings.TryGetSecond(out var type2CharStrings))
+            {
+                path = null;
+                return false;
+            }
+
+            path = type2CharStrings.Generate(characterName, (double)defaultWidthX, (double)nominalWidthX).Path;
+            return true;
+        }
+
+        /// <summary>
+        /// GetCharacterPath
+        /// </summary>
+        /// <param name="characterName"></param>
+        /// <returns></returns>
+        public IReadOnlyList<PdfSubpath> GetCharacterPath(string characterName)
+        {
+            var defaultWidthX = GetDefaultWidthX(characterName);
+            var nominalWidthX = GetNominalWidthX(characterName);
+
+            if (CharStrings.TryGetFirst(out var _))
+            {
+                throw new NotImplementedException("Type 1 CharStrings in a CFF font are currently unsupported.");
+            }
+
+            if (!CharStrings.TryGetSecond(out var type2CharStrings))
+            {
+                return null;
+            }
+
+            return type2CharStrings.Generate(characterName, (double)defaultWidthX, (double)nominalWidthX).Path;
         }
 
         /// <summary>
         /// Get the default width of x for the character.
         /// </summary>
-        protected virtual decimal GetDefaultWidthX(string characterName)
+        protected virtual double GetDefaultWidthX(string characterName)
         {
             return PrivateDictionary.DefaultWidthX;
         }
@@ -91,13 +165,21 @@
         /// <summary>
         /// Get the nominal width of x for the character.
         /// </summary>
-        protected virtual decimal GetNominalWidthX(string characterName)
+        protected virtual double GetNominalWidthX(string characterName)
         {
             return PrivateDictionary.NominalWidthX;
         }
+
+        /// <summary>
+        /// Get the Font Matrix for the corresponding character name, if available. Return <c>null</c> if not.
+        /// </summary>
+        public virtual TransformationMatrix? GetFontMatrix(string characterName)
+        {
+            return TopDictionary.FontMatrix;
+        }
     }
 
-    internal class CompactFontFormatCidFont : CompactFontFormatFont
+    internal sealed class CompactFontFormatCidFont : CompactFontFormatFont
     {
         public IReadOnlyList<CompactFontFormatTopLevelDictionary> FontDictionaries { get; }
         public IReadOnlyList<CompactFontFormatPrivateDictionary> PrivateDictionaries { get; }
@@ -115,7 +197,7 @@
             FdSelect = fdSelect;
         }
 
-        protected override decimal GetDefaultWidthX(string characterName)
+        protected override double GetDefaultWidthX(string characterName)
         {
             if (!TryGetPrivateDictionaryForCharacter(characterName, out var dictionary))
             {
@@ -125,7 +207,7 @@
             return dictionary.DefaultWidthX;
         }
 
-        protected override decimal GetNominalWidthX(string characterName)
+        protected override double GetNominalWidthX(string characterName)
         {
             if (!TryGetPrivateDictionaryForCharacter(characterName, out var dictionary))
             {
@@ -133,6 +215,26 @@
             }
 
             return dictionary.NominalWidthX;
+        }
+
+        public override TransformationMatrix? GetFontMatrix(string characterName)
+        {
+            // BobLd: It seems PdfBox just returns TopDictionary.FontMatrix
+            // But see https://bugs.ghostscript.com/show_bug.cgi?id=690724
+            // and https://github.com/veraPDF/veraPDF-library/issues/1010
+            // TODO - We might need to multiply both matrices together
+
+            if (TopDictionary.FontMatrix is not null)
+            {
+                return TopDictionary.FontMatrix;
+            }
+
+            if (!TryGetFontDictionaryForCharacter(characterName, out var dictionary))
+            {
+                return null;
+            }
+
+            return dictionary.FontMatrix;
         }
 
         private bool TryGetPrivateDictionaryForCharacter(string characterName, out CompactFontFormatPrivateDictionary dictionary)
@@ -148,6 +250,23 @@
             }
 
             dictionary = PrivateDictionaries[fd];
+
+            return true;
+        }
+
+        private bool TryGetFontDictionaryForCharacter(string characterName, out CompactFontFormatTopLevelDictionary dictionary)
+        {
+            dictionary = null;
+
+            var glyphId = Charset.GetGlyphIdByName(characterName);
+
+            var fd = FdSelect.GetFontDictionaryIndex(glyphId);
+            if (fd == -1)
+            {
+                return false;
+            }
+
+            dictionary = FontDictionaries[fd];
 
             return true;
         }

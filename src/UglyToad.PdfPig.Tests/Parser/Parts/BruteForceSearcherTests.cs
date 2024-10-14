@@ -1,12 +1,9 @@
 ﻿// ReSharper disable ObjectCreationAsStatement
 namespace UglyToad.PdfPig.Tests.Parser.Parts
 {
-    using System;
-    using System.IO;
     using Integration;
     using PdfPig.Core;
     using PdfPig.Parser.Parts;
-    using Xunit;
 
     public class BruteForceSearcherTests
     {
@@ -56,7 +53,7 @@ startxref
         [Fact]
         public void SearcherFindsCorrectObjects()
         {
-            var input = new ByteArrayInputBytes(OtherEncodings.StringAsLatin1Bytes(TestData));
+            var input = new MemoryInputBytes(OtherEncodings.StringAsLatin1Bytes(TestData));
 
             var locations = BruteForceSearcher.GetObjectLocations(input);
 
@@ -102,7 +99,7 @@ endobj
 
 %%EOF";
 
-            var bytes = new ByteArrayInputBytes(OtherEncodings.StringAsLatin1Bytes(s));
+            var bytes = new MemoryInputBytes(OtherEncodings.StringAsLatin1Bytes(s));
 
             var locations = BruteForceSearcher.GetObjectLocations(bytes);
 
@@ -133,7 +130,7 @@ endobj
 << /IsEmpty false >>
 endobj";
 
-            var bytes = new ByteArrayInputBytes(OtherEncodings.StringAsLatin1Bytes(s));
+            var bytes = new MemoryInputBytes(OtherEncodings.StringAsLatin1Bytes(s));
 
             var locations = BruteForceSearcher.GetObjectLocations(bytes);
 
@@ -177,7 +174,7 @@ endobj";
         [Fact]
         public void BruteForceSearcherBytesFileOffsetsCorrect()
         {
-            var bytes = new ByteArrayInputBytes(File.ReadAllBytes(IntegrationHelpers.GetDocumentPath("Single Page Simple - from inkscape.pdf")));
+            var bytes = new MemoryInputBytes(File.ReadAllBytes(IntegrationHelpers.GetDocumentPath("Single Page Simple - from inkscape.pdf")));
 
             var locations = BruteForceSearcher.GetObjectLocations(bytes);
 
@@ -200,7 +197,7 @@ endobj";
         [Fact]
         public void BruteForceSearcherFileOffsetsCorrectOpenOffice()
         {
-            var bytes = new ByteArrayInputBytes(File.ReadAllBytes(IntegrationHelpers.GetDocumentPath("Single Page Simple - from open office.pdf")));
+            var bytes = new MemoryInputBytes(File.ReadAllBytes(IntegrationHelpers.GetDocumentPath("Single Page Simple - from open office.pdf")));
 
             var locations = BruteForceSearcher.GetObjectLocations(bytes);
 
@@ -227,13 +224,48 @@ endobj";
         [Fact]
         public void BruteForceSearcherCorrectlyFindsAllObjectsWhenOffset()
         {
-            var input = new ByteArrayInputBytes(OtherEncodings.StringAsLatin1Bytes(TestData));
+            var input = new MemoryInputBytes(OtherEncodings.StringAsLatin1Bytes(TestData));
 
             input.Seek(593);
 
             var locations = BruteForceSearcher.GetObjectLocations(input);
 
             Assert.Equal(TestDataOffsets, locations.Values);
+        }
+
+        [Fact]
+        public void BruteForceSearcherFindsAllObjectsWhenMissingEndObj()
+        {
+            const string s = @"%PDF-1.7
+abcd
+
+1 0 obj
+<< /Type /Any >>
+
+2 0 obj
+<< /Type /Any >>
+
+%AZ 0 obj
+11 0 obj
+769
+endobj
+
+%%EOF";
+
+            var bytes = new MemoryInputBytes(OtherEncodings.StringAsLatin1Bytes(s));
+
+            var locations = BruteForceSearcher.GetObjectLocations(bytes);
+
+            Assert.Equal(3, locations.Count);
+
+            var expectedLocations = new long[]
+            {
+                s.IndexOf("1 0 obj", StringComparison.OrdinalIgnoreCase),
+                s.IndexOf("2 0 obj", StringComparison.OrdinalIgnoreCase),
+                s.IndexOf("11 0 obj", StringComparison.OrdinalIgnoreCase)
+            };
+
+            Assert.Equal(expectedLocations, locations.Values);
         }
 
         private static string GetStringAt(IInputBytes bytes, long location)

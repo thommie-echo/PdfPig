@@ -2,6 +2,7 @@
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics.CodeAnalysis;
     using Fonts;
     using Fonts.Encodings;
     using PdfPig.Parser.Parts;
@@ -17,22 +18,24 @@
             this.pdfScanner = pdfScanner;
         }
 
-        public Encoding Read(DictionaryToken fontDictionary, FontDescriptor descriptor = null,
-            Encoding fontEncoding = null)
+        public Encoding? Read(
+            DictionaryToken fontDictionary,
+            FontDescriptor? descriptor = null,
+            Encoding? fontEncoding = null)
         {
             if (!fontDictionary.TryGet(NameToken.Encoding, out var baseEncodingObject))
             {
                 return null;
             }
 
-            if (DirectObjectFinder.TryGet(baseEncodingObject, pdfScanner, out NameToken name))
+            if (DirectObjectFinder.TryGet(baseEncodingObject, pdfScanner, out NameToken? name))
             {
                 if (TryGetNamedEncoding(descriptor, name, out var namedEncoding))
                 {
                     return namedEncoding;
                 }
 
-                if (fontDictionary.TryGet(NameToken.BaseFont, pdfScanner, out NameToken baseFontName))
+                if (fontDictionary.TryGet(NameToken.BaseFont, pdfScanner, out NameToken? baseFontName))
                 {
                     if (string.Equals(baseFontName.Data, "ZapfDingbats", StringComparison.OrdinalIgnoreCase))
                     {
@@ -55,8 +58,13 @@
             return encoding;
         }
 
-        private Encoding ReadEncodingDictionary(DictionaryToken encodingDictionary, Encoding fontEncoding)
+        private Encoding? ReadEncodingDictionary(DictionaryToken encodingDictionary, Encoding? fontEncoding)
         {
+            if (encodingDictionary is null)
+            {
+                return null;
+            }
+            
             Encoding baseEncoding;
             if (encodingDictionary.TryGet(NameToken.BaseEncoding, out var baseEncodingToken) && baseEncodingToken is NameToken baseEncodingName)
             {
@@ -115,7 +123,7 @@
             return differences;
         }
 
-        private static bool TryGetNamedEncoding(FontDescriptor descriptor, NameToken encodingName, out Encoding encoding)
+        private static bool TryGetNamedEncoding(FontDescriptor? descriptor, NameToken encodingName, [NotNullWhen(true)] out Encoding? encoding)
         {
             encoding = null;
             // Symbolic fonts default to standard encoding.
@@ -133,4 +141,3 @@
         }
     }
 }
-

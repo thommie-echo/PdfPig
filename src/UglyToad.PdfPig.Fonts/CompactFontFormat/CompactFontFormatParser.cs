@@ -53,7 +53,7 @@
             {
                 var fontName = fontNames[i];
 
-                fonts[fontName] = individualFontParser.Parse(data, fontName, topLevelDictionaryIndex[i], stringIndex, globalSubroutineIndex);
+                fonts[fontName] = individualFontParser.Parse(data, fontName, topLevelDictionaryIndex[i].Span, stringIndex, globalSubroutineIndex);
             }
 
             return new CompactFontFormatFontCollection(header, fonts);
@@ -85,7 +85,7 @@
 
             if (index.Length == 0)
             {
-                return EmptyArray<string>.Instance;
+                return [];
             }
 
             var count = index.Length - 1;

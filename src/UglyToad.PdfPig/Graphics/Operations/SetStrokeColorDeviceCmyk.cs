@@ -2,7 +2,6 @@
 {
     using System.IO;
 
-    /// <inheritdoc />
     /// <summary>
     /// Set the stroking color space to DeviceCMYK and set the color to use for stroking operations.
     /// </summary>
@@ -12,29 +11,29 @@
         /// The symbol for this operation in a stream.
         /// </summary>
         public const string Symbol = "K";
-        
+
         /// <inheritdoc />
         public string Operator => Symbol;
 
         /// <summary>
         /// The cyan level between 0 and 1.
         /// </summary>
-        public decimal C { get; }
+        public double C { get; }
 
         /// <summary>
         /// The magenta level between 0 and 1.
         /// </summary>
-        public decimal M { get; }
+        public double M { get; }
 
         /// <summary>
         /// The yellow level between 0 and 1.
         /// </summary>
-        public decimal Y { get; }
+        public double Y { get; }
 
         /// <summary>
         /// The key level between 0 and 1.
         /// </summary>
-        public decimal K { get; }
+        public double K { get; }
 
         /// <summary>
         /// Create a new <see cref="SetStrokeColorDeviceCmyk"/>.
@@ -43,7 +42,7 @@
         /// <param name="m">The magenta level.</param>
         /// <param name="y">The yellow level.</param>
         /// <param name="k">The key level.</param>
-        public SetStrokeColorDeviceCmyk(decimal c, decimal m, decimal y, decimal k)
+        public SetStrokeColorDeviceCmyk(double c, double m, double y, double k)
         {
             C = c;
             M = m;
@@ -54,19 +53,19 @@
         /// <inheritdoc />
         public void Run(IOperationContext operationContext)
         {
-            operationContext.ColorSpaceContext.SetStrokingColorCmyk(C, M, Y, K);
+            operationContext.GetCurrentState().ColorSpaceContext.SetStrokingColorCmyk(C, M, Y, K);
         }
 
         /// <inheritdoc />
         public void Write(Stream stream)
         {
-            stream.WriteDecimal(C);
+            stream.WriteDouble(C);
             stream.WriteWhiteSpace();
-            stream.WriteDecimal(M);
+            stream.WriteDouble(M);
             stream.WriteWhiteSpace();
-            stream.WriteDecimal(Y);
+            stream.WriteDouble(Y);
             stream.WriteWhiteSpace();
-            stream.WriteDecimal(K);
+            stream.WriteDouble(K);
             stream.WriteWhiteSpace();
             stream.WriteText(Symbol);
             stream.WriteNewLine();

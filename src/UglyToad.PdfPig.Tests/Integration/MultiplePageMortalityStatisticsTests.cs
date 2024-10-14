@@ -1,11 +1,6 @@
 ﻿namespace UglyToad.PdfPig.Tests.Integration
 {
-    using System;
-    using System.Collections.Generic;
-    using System.IO;
-    using System.Linq;
     using Content;
-    using Xunit;
 
     public class MultiplePageMortalityStatisticsTests
     {
@@ -30,7 +25,7 @@
         {
             using (var document = PdfDocument.Open(GetFilename()))
             {
-                Assert.Equal(1.7m, document.Version);
+                Assert.Equal(1.7, document.Version);
             }
         }
 

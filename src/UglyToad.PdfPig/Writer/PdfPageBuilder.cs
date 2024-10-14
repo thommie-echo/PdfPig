@@ -1,5 +1,9 @@
 ﻿namespace UglyToad.PdfPig.Writer
 {
+    using System;
+    using System.Collections.Generic;
+    using System.IO;
+    using System.Linq;
     using Content;
     using Core;
     using Fonts;
@@ -13,15 +17,66 @@
     using Graphics.Operations.TextShowing;
     using Graphics.Operations.TextState;
     using Images;
-    using System;
-    using System.Collections.Generic;
-    using System.Diagnostics;
-    using System.IO;
-    using System.Linq;
     using PdfFonts;
     using Tokens;
     using Graphics.Operations.PathPainting;
     using Images.Png;
+    using Actions;
+
+    internal class NameConflictSolver
+    {
+        private readonly string prefix;
+        private int key = 0;
+        private readonly HashSet<string> xobjectNamesUsed = new HashSet<string>();
+
+        public NameConflictSolver(string prefix)
+        {
+            this.prefix = prefix;
+        }
+
+        private string ExtractPrefix(string? name)
+        {
+            if (name is null)
+            {
+                return prefix;
+            }
+
+            var i = 0;
+            while (i < name.Length && (name[i] < '0' || name[i] > '9'))
+            {
+                i++;
+            }
+
+            return i != 0 ? name.Substring(0, i) : prefix;
+        }
+
+        public string NewName(string? originalName = null)
+        {
+            var newPrefix = ExtractPrefix(originalName);
+
+            var name = $"{newPrefix}{key}";
+
+            while (xobjectNamesUsed.Contains(name))
+            {
+                name = $"{newPrefix}{++key}";
+            }
+
+            xobjectNamesUsed.Add(name);
+
+            return name;
+        }
+
+        public string FixName(string name)
+        {
+            if (xobjectNamesUsed.Contains(name))
+            {
+                return NewName(name);
+            }
+
+            xobjectNamesUsed.Add(name);
+            return name;
+        }
+    }
 
     /// <summary>
     /// A builder used to add construct a page in a PDF document.
@@ -33,11 +88,14 @@
 
         // all page data other than content streams
         internal readonly Dictionary<NameToken, IToken> pageDictionary = new Dictionary<NameToken, IToken>();
-        
+
         // streams
         internal readonly List<IPageContentStream> contentStreams;
         private IPageContentStream currentStream;
-        
+
+        // links to be resolved when all page references are available
+        internal readonly List<(DictionaryToken token, PdfAction action)>? links;
+
         // maps fonts added using PdfDocumentBuilder to page font names
         private readonly Dictionary<Guid, NameToken> documentFonts = new Dictionary<Guid, NameToken>();
         internal int nextFontId = 1;
@@ -45,7 +103,11 @@
         //a sequence number of ShowText operation to determine whether letters belong to same operation or not (letters that belong to different operations have less changes to belong to same word)
         private int textSequence;
 
-        private int imageKey = 1;
+        private NameConflictSolver xobjectsNames = new NameConflictSolver("I");
+
+        private NameConflictSolver gStateNames = new NameConflictSolver("GS");
+
+        internal int? rotation;
 
         internal IReadOnlyDictionary<string, IToken> Resources => pageDictionary.GetOrCreateDict(NameToken.Resources);
 
@@ -75,20 +137,21 @@
             PageNumber = number;
 
             currentStream = new DefaultContentStream();
-            contentStreams = new List<IPageContentStream>() {currentStream};
+            contentStreams = new List<IPageContentStream>() { currentStream };
         }
 
         internal PdfPageBuilder(int number, PdfDocumentBuilder documentBuilder, IEnumerable<CopiedContentStream> copied,
-            Dictionary<NameToken, IToken> pageDict)
+            Dictionary<NameToken, IToken> pageDict, List<(DictionaryToken token, PdfAction action)> links)
         {
             this.documentBuilder = documentBuilder ?? throw new ArgumentNullException(nameof(documentBuilder));
+            this.links = links;
             PageNumber = number;
             pageDictionary = pageDict;
             contentStreams = new List<IPageContentStream>();
             contentStreams.AddRange(copied);
             currentStream = new DefaultContentStream();
             contentStreams.Add(currentStream);
-        }	        
+        }
 
         /// <summary>
         /// Allow to append a new content stream before the current one and select it
@@ -132,21 +195,23 @@
         /// <param name="from">The first point on the line.</param>
         /// <param name="to">The last point on the line.</param>
         /// <param name="lineWidth">The width of the line in user space units.</param>
-        public void DrawLine(PdfPoint from, PdfPoint to, decimal lineWidth = 1)
+        public PdfPageBuilder DrawLine(PdfPoint from, PdfPoint to, double lineWidth = 1)
         {
             if (lineWidth != 1)
             {
                 currentStream.Add(new SetLineWidth(lineWidth));
             }
 
-            currentStream.Add(new BeginNewSubpath((decimal)from.X, (decimal)from.Y));
-            currentStream.Add(new AppendStraightLineSegment((decimal)to.X, (decimal)to.Y));
+            currentStream.Add(new BeginNewSubpath(from.X, from.Y));
+            currentStream.Add(new AppendStraightLineSegment(to.X, to.Y));
             currentStream.Add(StrokePath.Value);
 
             if (lineWidth != 1)
             {
                 currentStream.Add(new SetLineWidth(1));
             }
+
+            return this;
         }
 
         /// <summary>
@@ -157,14 +222,14 @@
         /// <param name="height">The height of the rectangle.</param>
         /// <param name="lineWidth">The width of the line border of the rectangle.</param>
         /// <param name="fill">Whether to fill with the color set by <see cref="SetTextAndFillColor"/>.</param>
-        public void DrawRectangle(PdfPoint position, decimal width, decimal height, decimal lineWidth = 1, bool fill = false)
+        public PdfPageBuilder DrawRectangle(PdfPoint position, double width, double height, double lineWidth = 1, bool fill = false)
         {
             if (lineWidth != 1)
             {
                 currentStream.Add(new SetLineWidth(lineWidth));
             }
 
-            currentStream.Add(new AppendRectangle((decimal)position.X, (decimal)position.Y, width, height));
+            currentStream.Add(new AppendRectangle(position.X, position.Y, width, height));
 
             if (fill)
             {
@@ -179,6 +244,128 @@
             {
                 currentStream.Add(new SetLineWidth(lineWidth));
             }
+
+            return this;
+        }
+
+        /// <summary>
+        /// Set the number of degrees by which the page is rotated clockwise when displayed or printed.
+        /// </summary>
+        public PdfPageBuilder SetRotation(PageRotationDegrees degrees)
+        {
+            rotation = degrees.Value;
+            return this;
+        }
+
+        /// <summary>
+        /// Draws a triangle on the current page with the specified points and line width.
+        /// </summary>
+        /// <param name="point1">Position of the first corner of the triangle.</param>
+        /// <param name="point2">Position of the second corner of the triangle.</param>
+        /// <param name="point3">Position of the third corner of the triangle.</param>
+        /// <param name="lineWidth">The width of the line border of the triangle.</param>
+        /// <param name="fill">Whether to fill with the color set by <see cref="SetTextAndFillColor"/>.</param>
+        public PdfPageBuilder DrawTriangle(PdfPoint point1, PdfPoint point2, PdfPoint point3, double lineWidth = 1, bool fill = false)
+        {
+            if (lineWidth != 1)
+            {
+                currentStream.Add(new SetLineWidth(lineWidth));
+            }
+
+            currentStream.Add(new BeginNewSubpath(point1.X, point1.Y));
+            currentStream.Add(new AppendStraightLineSegment(point2.X, point2.Y));
+            currentStream.Add(new AppendStraightLineSegment(point3.X, point3.Y));
+            currentStream.Add(new AppendStraightLineSegment(point1.X, point1.Y));
+
+            if (fill)
+            {
+                currentStream.Add(FillPathEvenOddRuleAndStroke.Value);
+            }
+            else
+            {
+                currentStream.Add(StrokePath.Value);
+            }
+
+            if (lineWidth != 1)
+            {
+                currentStream.Add(new SetLineWidth(lineWidth));
+            }
+
+            return this;
+        }
+
+        /// <summary>
+        /// Draws a circle on the current page centering at the specified point with the given diameter and line width.
+        /// </summary>
+        /// <param name="center">The center position of the circle.</param>
+        /// <param name="diameter">The diameter of the circle.</param>
+        /// <param name="lineWidth">The width of the line border of the circle.</param>
+        /// <param name="fill">Whether to fill with the color set by <see cref="SetTextAndFillColor"/>.</param>
+        public PdfPageBuilder DrawCircle(PdfPoint center, double diameter, double lineWidth = 1, bool fill = false)
+        {
+            DrawEllipsis(center, diameter, diameter, lineWidth, fill);
+
+            return this;
+        }
+
+        /// <summary>
+        /// Draws an ellipsis on the current page centering at the specified point with the given width, height and line width.
+        /// </summary>
+        /// <param name="center">The center position of the ellipsis.</param>
+        /// <param name="width">The width of the ellipsis.</param>
+        /// <param name="height">The height of the ellipsis.</param>
+        /// <param name="lineWidth">The width of the line border of the ellipsis.</param>
+        /// <param name="fill">Whether to fill with the color set by <see cref="SetTextAndFillColor"/>.</param>
+        public PdfPageBuilder DrawEllipsis(PdfPoint center, double width, double height, double lineWidth = 1, bool fill = false)
+        {
+            width /= 2;
+            height /= 2;
+
+            // See here: https://spencermortensen.com/articles/bezier-circle/
+            const double cc = 0.55228474983079;
+
+            if (lineWidth != 1)
+            {
+                currentStream.Add(new SetLineWidth(lineWidth));
+            }
+
+            currentStream.Add(new BeginNewSubpath(center.X - width, center.Y));
+            currentStream.Add(new AppendDualControlPointBezierCurve(
+                center.X - width, center.Y + height * cc,
+                center.X - width * cc, center.Y + height,
+                center.X, center.Y + height
+            ));
+            currentStream.Add(new AppendDualControlPointBezierCurve(
+                center.X + width * cc, center.Y + height,
+                center.X + width, center.Y + height * cc,
+                center.X + width, center.Y
+            ));
+            currentStream.Add(new AppendDualControlPointBezierCurve(
+                center.X + width, center.Y - height * cc,
+                center.X + width * cc, center.Y - height,
+                center.X, center.Y - height
+            ));
+            currentStream.Add(new AppendDualControlPointBezierCurve(
+                center.X - width * cc, center.Y - height,
+                center.X - width, center.Y - height * cc,
+                center.X - width, center.Y
+            ));
+
+            if (fill)
+            {
+                currentStream.Add(FillPathEvenOddRuleAndStroke.Value);
+            }
+            else
+            {
+                currentStream.Add(StrokePath.Value);
+            }
+
+            if (lineWidth != 1)
+            {
+                currentStream.Add(new SetLineWidth(lineWidth));
+            }
+
+            return this;
         }
 
         /// <summary>
@@ -187,23 +374,27 @@
         /// <param name="r">Red - 0 to 255</param>
         /// <param name="g">Green - 0 to 255</param>
         /// <param name="b">Blue - 0 to 255</param>
-        public void SetStrokeColor(byte r, byte g, byte b)
+        public PdfPageBuilder SetStrokeColor(byte r, byte g, byte b)
         {
             currentStream.Add(Push.Value);
-            currentStream.Add(new SetStrokeColorDeviceRgb(RgbToDecimal(r), RgbToDecimal(g), RgbToDecimal(b)));
+            currentStream.Add(new SetStrokeColorDeviceRgb(RgbToDouble(r), RgbToDouble(g), RgbToDouble(b)));
+
+            return this;
         }
 
         /// <summary>
-        /// Sets the stroke color with the exact decimal value between 0 and 1 for any following operations to the RGB value. Use <see cref="ResetColor"/> to reset.
+        /// Sets the stroke color with the exact value between 0 and 1 for any following operations to the RGB value. Use <see cref="ResetColor"/> to reset.
         /// </summary>
         /// <param name="r">Red - 0 to 1</param>
         /// <param name="g">Green - 0 to 1</param>
         /// <param name="b">Blue - 0 to 1</param>
-        internal void SetStrokeColorExact(decimal r, decimal g, decimal b)
+        internal PdfPageBuilder SetStrokeColorExact(double r, double g, double b)
         {
             currentStream.Add(Push.Value);
-            currentStream.Add(new SetStrokeColorDeviceRgb(CheckRgbDecimal(r, nameof(r)),
-                CheckRgbDecimal(g, nameof(g)), CheckRgbDecimal(b, nameof(b))));
+            currentStream.Add(new SetStrokeColorDeviceRgb(CheckRgbDouble(r, nameof(r)),
+                CheckRgbDouble(g, nameof(g)), CheckRgbDouble(b, nameof(b))));
+
+            return this;
         }
 
         /// <summary>
@@ -212,18 +403,22 @@
         /// <param name="r">Red - 0 to 255</param>
         /// <param name="g">Green - 0 to 255</param>
         /// <param name="b">Blue - 0 to 255</param>
-        public void SetTextAndFillColor(byte r, byte g, byte b)
+        public PdfPageBuilder SetTextAndFillColor(byte r, byte g, byte b)
         {
             currentStream.Add(Push.Value);
-            currentStream.Add(new SetNonStrokeColorDeviceRgb(RgbToDecimal(r), RgbToDecimal(g), RgbToDecimal(b)));
+            currentStream.Add(new SetNonStrokeColorDeviceRgb(RgbToDouble(r), RgbToDouble(g), RgbToDouble(b)));
+
+            return this;
         }
 
         /// <summary>
         /// Restores the stroke, text and fill color to default (black).
         /// </summary>
-        public void ResetColor()
+        public PdfPageBuilder ResetColor()
         {
             currentStream.Add(Pop.Value);
+
+            return this;
         }
 
         /// <summary>
@@ -237,14 +432,14 @@
         /// or <see cref="PdfDocumentBuilder.AddStandard14Font"/> methods.
         /// </param> 
         /// <returns>The letters from the input text with their corresponding size and position.</returns>
-        public IReadOnlyList<Letter> MeasureText(string text, decimal fontSize, PdfPoint position, PdfDocumentBuilder.AddedFont font)
+        public IReadOnlyList<Letter> MeasureText(string text, double fontSize, PdfPoint position, PdfDocumentBuilder.AddedFont font)
         {
-            if (font == null)
+            if (font is null)
             {
                 throw new ArgumentNullException(nameof(font));
             }
 
-            if (text == null)
+            if (text is null)
             {
                 throw new ArgumentNullException(nameof(text));
             }
@@ -282,14 +477,14 @@
         /// or <see cref="PdfDocumentBuilder.AddStandard14Font"/> methods.
         /// </param> 
         /// <returns>The letters from the input text with their corresponding size and position.</returns>
-        public IReadOnlyList<Letter> AddText(string text, decimal fontSize, PdfPoint position, PdfDocumentBuilder.AddedFont font)
+        public IReadOnlyList<Letter> AddText(string text, double fontSize, PdfPoint position, PdfDocumentBuilder.AddedFont font)
         {
-            if (font == null)
+            if (font is null)
             {
                 throw new ArgumentNullException(nameof(font));
             }
 
-            if (text == null)
+            if (text is null)
             {
                 throw new ArgumentNullException(nameof(text));
             }
@@ -317,7 +512,7 @@
 
             currentStream.Add(BeginText.Value);
             currentStream.Add(new SetFontAndSize(fontName, fontSize));
-            currentStream.Add(new MoveToNextLineWithOffset((decimal)position.X, (decimal)position.Y));
+            currentStream.Add(new MoveToNextLineWithOffset(position.X, position.Y));
             var bytesPerShow = new List<byte>();
             foreach (var letter in text)
             {
@@ -341,13 +536,26 @@
             return letters;
         }
 
+        /// <summary>
+        /// Set the text rendering mode. This will apply to all future calls to AddText until called again.
+        ///
+        /// To insert invisible text, for example output of OCR, use <c>TextRenderingMode.Neither</c>.
+        /// </summary>
+        /// <param name="mode">Text rendering mode to set.</param>
+        public PdfPageBuilder SetTextRenderingMode(TextRenderingMode mode)
+        {
+            currentStream.Add(new SetTextRenderingMode(mode));
+
+            return this;
+        }
+
         private NameToken GetAddedFont(PdfDocumentBuilder.AddedFont font)
         {
-            if (!documentFonts.TryGetValue(font.Id, out NameToken value))
+            if (!documentFonts.TryGetValue(font.Id, out NameToken? value))
             {
                 value = NameToken.Create($"F{nextFontId++}");
                 var resources = pageDictionary.GetOrCreateDict(NameToken.Resources);
-                var fonts  = resources.GetOrCreateDict(NameToken.Font);
+                var fonts = resources.GetOrCreateDict(NameToken.Font);
                 while (fonts.ContainsKey(value))
                 {
                     value = NameToken.Create($"F{nextFontId++}");
@@ -370,14 +578,23 @@
                 return AddJpeg(stream, placementRectangle);
             }
         }
-        
+
         /// <summary>
         /// Adds the JPEG image represented by the input stream at the specified location.
         /// </summary>
-        public AddedImage AddJpeg(Stream fileStream, PdfRectangle placementRectangle)
+        public AddedImage AddJpeg(Stream fileStream, PdfRectangle placementRectangle = default)
         {
             var startFrom = fileStream.Position;
             var info = JpegHandler.GetInformation(fileStream);
+
+            if (placementRectangle.Equals(default(PdfRectangle)))
+            {
+                placementRectangle = new PdfRectangle(
+                    0,
+                    0,
+                    info.Width,
+                    info.Height);
+            }
 
             byte[] data;
             using (var memory = new MemoryStream())
@@ -387,6 +604,20 @@
                 data = memory.ToArray();
             }
 
+            NameToken colorSpace;
+            if (info.NumberOfComponents == 1)
+            {
+                colorSpace = NameToken.Devicegray;
+            }
+            else if (info.NumberOfComponents == 4)
+            {
+                colorSpace = NameToken.Devicecmyk;
+            }
+            else
+            {
+                colorSpace = NameToken.Devicergb;
+            }
+
             var imgDictionary = new Dictionary<NameToken, IToken>
             {
                 {NameToken.Type, NameToken.Xobject },
@@ -394,7 +625,7 @@
                 {NameToken.Width, new NumericToken(info.Width) },
                 {NameToken.Height, new NumericToken(info.Height) },
                 {NameToken.BitsPerComponent, new NumericToken(info.BitsPerComponent)},
-                {NameToken.ColorSpace, NameToken.Devicergb},
+                {NameToken.ColorSpace, colorSpace},
                 {NameToken.Filter, NameToken.DctDecode},
                 {NameToken.Length, new NumericToken(data.Length)}
             };
@@ -403,16 +634,16 @@
             var resources = pageDictionary.GetOrCreateDict(NameToken.Resources);
             var xObjects = resources.GetOrCreateDict(NameToken.Xobject);
 
-            var key = NameToken.Create($"I{imageKey++}");
+            var key = NameToken.Create(xobjectsNames.NewName());
             xObjects[key] = reference;
 
             currentStream.Add(Push.Value);
             // This needs to be the placement rectangle.
-            currentStream.Add(new ModifyCurrentTransformationMatrix(new []
+            currentStream.Add(new ModifyCurrentTransformationMatrix(new[]
             {
-                (decimal)placementRectangle.Width, 0,
-                0, (decimal)placementRectangle.Height,
-                (decimal)placementRectangle.BottomLeft.X, (decimal)placementRectangle.BottomLeft.Y
+                placementRectangle.Width, 0,
+                0, placementRectangle.Height,
+                placementRectangle.BottomLeft.X, placementRectangle.BottomLeft.Y
             }));
             currentStream.Add(new InvokeNamedXObject(key));
             currentStream.Add(Pop.Value);
@@ -437,16 +668,16 @@
             var resources = pageDictionary.GetOrCreateDict(NameToken.Resources);
             var xObjects = resources.GetOrCreateDict(NameToken.Xobject);
 
-            var key = NameToken.Create($"I{imageKey++}");
+            var key = NameToken.Create(xobjectsNames.NewName());
             xObjects[key] = new IndirectReferenceToken(image.Reference);
 
             currentStream.Add(Push.Value);
             // This needs to be the placement rectangle.
             currentStream.Add(new ModifyCurrentTransformationMatrix(new[]
             {
-                (decimal)placementRectangle.Width, 0,
-                0, (decimal)placementRectangle.Height,
-                (decimal)placementRectangle.BottomLeft.X, (decimal)placementRectangle.BottomLeft.Y
+                placementRectangle.Width, 0,
+                0, placementRectangle.Height,
+                placementRectangle.BottomLeft.X, placementRectangle.BottomLeft.Y
             }));
             currentStream.Add(new InvokeNamedXObject(key));
             currentStream.Add(Pop.Value);
@@ -466,62 +697,104 @@
         /// <summary>
         /// Adds the PNG image represented by the input stream at the specified location.
         /// </summary>
-        public AddedImage AddPng(Stream pngStream, PdfRectangle placementRectangle)
+        public AddedImage AddPng(Stream pngStream, PdfRectangle placementRectangle = default)
         {
             var png = Png.Open(pngStream);
 
-            byte[] data;
-            var pixelBuffer = new byte[3];
-            using (var memoryStream = new MemoryStream())
+            if (placementRectangle.Equals(default(PdfRectangle)))
             {
+                placementRectangle = new PdfRectangle(0, 0, png.Width, png.Height);
+            }
+
+            var data = new byte[png.Width * png.Height * 3];
+            int pixelIndex = 0;
+          
+            for (var rowIndex = 0; rowIndex < png.Height; rowIndex++)
+            {
+                for (var colIndex = 0; colIndex < png.Width; colIndex++)
+                {
+                    var pixel = png.GetPixel(colIndex, rowIndex);
+
+                    data[pixelIndex++] = pixel.R;
+                    data[pixelIndex++] = pixel.G;
+                    data[pixelIndex++] = pixel.B;
+                }
+            }
+
+            var widthToken = new NumericToken(png.Width);
+            var heightToken = new NumericToken(png.Height);
+
+            IndirectReferenceToken? smaskReference = null;
+
+            if (png.HasAlphaChannel && documentBuilder.ArchiveStandard != PdfAStandard.A1B && documentBuilder.ArchiveStandard != PdfAStandard.A1A)
+            {
+                var smaskData = new byte[data.Length / 3];
                 for (var rowIndex = 0; rowIndex < png.Height; rowIndex++)
                 {
                     for (var colIndex = 0; colIndex < png.Width; colIndex++)
                     {
                         var pixel = png.GetPixel(colIndex, rowIndex);
 
-                        pixelBuffer[0] = pixel.R;
-                        pixelBuffer[1] = pixel.G;
-                        pixelBuffer[2] = pixel.B;
-
-                        memoryStream.Write(pixelBuffer, 0, pixelBuffer.Length);
+                        var index = rowIndex * png.Width + colIndex;
+                        smaskData[index] = pixel.A;
                     }
                 }
 
-                data = memoryStream.ToArray();
+                var compressedSmask = DataCompresser.CompressBytes(smaskData);
+
+                // Create a soft-mask.
+                var smaskDictionary = new Dictionary<NameToken, IToken>
+                {
+                    {NameToken.Type, NameToken.Xobject},
+                    {NameToken.Subtype, NameToken.Image},
+                    {NameToken.Width, widthToken},
+                    {NameToken.Height, heightToken},
+                    {NameToken.ColorSpace, NameToken.Devicegray},
+                    {NameToken.BitsPerComponent, new NumericToken(8)},
+                    {NameToken.Decode, new ArrayToken(new IToken[] { new NumericToken(0), new NumericToken(1) })},
+                    {NameToken.Length, new NumericToken(compressedSmask.Length)},
+                    {NameToken.Filter, NameToken.FlateDecode}
+                };
+
+                smaskReference = documentBuilder.AddImage(new DictionaryToken(smaskDictionary), compressedSmask);
             }
 
             var compressed = DataCompresser.CompressBytes(data);
 
             var imgDictionary = new Dictionary<NameToken, IToken>
             {
-                {NameToken.Type, NameToken.Xobject },
-                {NameToken.Subtype, NameToken.Image },
-                {NameToken.Width, new NumericToken(png.Width) },
-                {NameToken.Height, new NumericToken(png.Height) },
-                {NameToken.BitsPerComponent, new NumericToken(png.Header.BitDepth)},
+                {NameToken.Type, NameToken.Xobject},
+                {NameToken.Subtype, NameToken.Image},
+                {NameToken.Width, widthToken},
+                {NameToken.Height, heightToken},
+                {NameToken.BitsPerComponent, new NumericToken(8)},
                 {NameToken.ColorSpace, NameToken.Devicergb},
                 {NameToken.Filter, NameToken.FlateDecode},
                 {NameToken.Length, new NumericToken(compressed.Length)}
             };
-            
+
+            if (smaskReference != null)
+            {
+                imgDictionary.Add(NameToken.Smask, smaskReference);
+            }
+
             var reference = documentBuilder.AddImage(new DictionaryToken(imgDictionary), compressed);
 
             var resources = pageDictionary.GetOrCreateDict(NameToken.Resources);
             var xObjects = resources.GetOrCreateDict(NameToken.Xobject);
 
-            var key = NameToken.Create($"I{imageKey++}");
+            var key = NameToken.Create(xobjectsNames.NewName());
 
             xObjects[key] = reference;
 
             currentStream.Add(Push.Value);
             // This needs to be the placement rectangle.
-            currentStream.Add(new ModifyCurrentTransformationMatrix(new[]
-            {
-                (decimal)placementRectangle.Width, 0,
-                0, (decimal)placementRectangle.Height,
-                (decimal)placementRectangle.BottomLeft.X, (decimal)placementRectangle.BottomLeft.Y
-            }));
+            currentStream.Add(new ModifyCurrentTransformationMatrix(
+            [
+                placementRectangle.Width, 0,
+                0, placementRectangle.Height,
+                placementRectangle.BottomLeft.X, placementRectangle.BottomLeft.Y
+            ]));
             currentStream.Add(new InvokeNamedXObject(key));
             currentStream.Add(Pop.Value);
 
@@ -532,7 +805,7 @@
         /// Copy a page from unknown source to this page
         /// </summary>
         /// <param name="srcPage">Page to be copied</param>
-        public void CopyFrom(Page srcPage)
+        public PdfPageBuilder CopyFrom(Page srcPage)
         {
             if (currentStream.Operations.Count > 0)
             {
@@ -541,12 +814,12 @@
 
             var destinationStream = currentStream;
 
-            if (!srcPage.Dictionary.TryGet(NameToken.Resources, srcPage.pdfScanner, out DictionaryToken srcResourceDictionary))
+            if (!srcPage.Dictionary.TryGet(NameToken.Resources, srcPage.pdfScanner, out DictionaryToken? srcResourceDictionary))
             {
                 // If the page doesn't have resources, then we copy the entire content stream, since not operation would collide 
                 // with the ones already written
                 destinationStream.Operations.AddRange(srcPage.Operations);
-                return;
+                return this;
             }
 
             // TODO: How should we handle any other token in the page dictionary (Eg. LastModified, MediaBox, CropBox, BleedBox, TrimBox, ArtBox,
@@ -583,7 +856,7 @@
 
             // Special cases
             // Since we don't directly add font's to the pages resources, we have to go look at the document's font
-            if(srcResourceDictionary.TryGet(NameToken.Font, srcPage.pdfScanner, out DictionaryToken fontsDictionary))
+            if (srcResourceDictionary.TryGet(NameToken.Font, srcPage.pdfScanner, out DictionaryToken? fontsDictionary))
             {
                 var pageFontsDictionary = resources.GetOrCreateDict(NameToken.Font);
 
@@ -628,19 +901,19 @@
             }
 
             // Since we don't directly add xobjects's to the pages resources, we have to go look at the document's xobjects
-            if (srcResourceDictionary.TryGet(NameToken.Xobject, srcPage.pdfScanner, out DictionaryToken xobjectsDictionary))
+            if (srcResourceDictionary.TryGet(NameToken.Xobject, srcPage.pdfScanner, out DictionaryToken? xobjectsDictionary))
             {
                 var pageXobjectsDictionary = resources.GetOrCreateDict(NameToken.Xobject);
 
-                var xobjectNamesUsed = Enumerable.Range(0, imageKey).Select(i => $"I{i}");
                 foreach (var xobjectSet in xobjectsDictionary.Data)
                 {
                     var xobjectName = xobjectSet.Key;
-                    if (xobjectName[0] == 'I' && xobjectNamesUsed.Any(s => s == xobjectName))
-                    {
-                        // This would mean that the imported xobject collide with one of the added image. so we have to rename it
-                        var newName = $"I{imageKey++}";
 
+                    // This would mean that the imported xobject collide with one of the added image. so we have to rename it
+                    var newName = xobjectsNames.FixName(xobjectName);
+
+                    if (xobjectName != newName)
+                    {
                         // Set all the pertinent SetFontAndSize operations with the new name
                         operations = operations.Select(op =>
                         {
@@ -656,9 +929,9 @@
 
                             return op;
                         }).ToList();
-
-                        xobjectName = newName;
                     }
+
+                    xobjectName = newName;
 
                     if (!(xobjectSet.Value is IndirectReferenceToken fontReferenceToken))
                     {
@@ -669,17 +942,61 @@
                 }
             }
 
+            // Since we don't directly add xobjects's to the pages resources, we have to go look at the document's xobjects
+            if (srcResourceDictionary.TryGet(NameToken.ExtGState, srcPage.pdfScanner, out DictionaryToken? gsDictionary))
+            {
+                var pageGstateDictionary = resources.GetOrCreateDict(NameToken.ExtGState);
+
+                foreach (var gstate in gsDictionary.Data)
+                {
+                    var gstateName = gstate.Key;
+                    var newName = gStateNames.FixName(gstateName);
+
+                    if (newName != gstateName)
+                    {
+                        // This would mean that the imported xobject collide with one of the added image. so we have to rename it
+
+                        // Set all the pertinent SetFontAndSize operations with the new name
+                        operations = operations.Select(op =>
+                        {
+                            if (!(op is SetGraphicsStateParametersFromDictionary invokeNamedOperation))
+                            {
+                                return op;
+                            }
+
+                            if (invokeNamedOperation.Name.Data == gstateName)
+                            {
+                                return new SetGraphicsStateParametersFromDictionary(NameToken.Create(newName));
+                            }
+
+                            return op;
+                        }).ToList();
+
+                        gstateName = newName;
+                    }
+
+                    if (!(gstate.Value is IndirectReferenceToken fontReferenceToken))
+                    {
+                        throw new PdfDocumentFormatException($"Expected a IndirectReferenceToken for the XObject, got a {gstate.Value.GetType().Name}");
+                    }
+
+                    pageGstateDictionary[gstateName] = documentBuilder.CopyToken(srcPage.pdfScanner, fontReferenceToken);
+                }
+            }
+
             destinationStream.Operations.AddRange(operations);
+
+            return this;
         }
 
-        private List<Letter> DrawLetters(NameToken name, string text, IWritingFont font, TransformationMatrix fontMatrix, decimal fontSize, TransformationMatrix textMatrix)
+        private List<Letter> DrawLetters(NameToken? name, string text, IWritingFont font, in TransformationMatrix fontMatrix, double fontSize, TransformationMatrix textMatrix)
         {
             var horizontalScaling = 1;
             var rise = 0;
             var letters = new List<Letter>();
 
             var renderingMatrix =
-                TransformationMatrix.FromValues((double)fontSize * horizontalScaling, 0, 0, (double)fontSize, 0, rise);
+                TransformationMatrix.FromValues(fontSize * horizontalScaling, 0, 0, fontSize, 0, rise);
 
             var width = 0.0;
 
@@ -691,7 +1008,7 @@
 
                 if (!font.TryGetBoundingBox(c, out var rect))
                 {
-                    throw new InvalidOperationException($"The font does not contain a character: {c}.");
+                    throw new InvalidOperationException($"The font does not contain a character: '{c}' (0x{(int)c:X}).");
                 }
 
                 if (!font.TryGetAdvanceWidth(c, out var charWidth))
@@ -704,9 +1021,18 @@
 
                 var documentSpace = textMatrix.Transform(renderingMatrix.Transform(fontMatrix.Transform(rect)));
 
-                var letter = new Letter(c.ToString(), documentSpace, advanceRect.BottomLeft, advanceRect.BottomRight, width, (double)fontSize, FontDetails.GetDefault(name),
+                var letter = new Letter(
+                    c.ToString(),
+                    documentSpace,
+                    advanceRect.BottomLeft,
+                    advanceRect.BottomRight,
+                    width,
+                    fontSize,
+                    FontDetails.GetDefault(name),
+                    TextRenderingMode.Fill,
                     GrayColor.Black,
-                    (double)fontSize,
+                    GrayColor.Black,
+                    fontSize,
                     textSequence);
 
                 letters.Add(letter);
@@ -724,24 +1050,24 @@
             return letters;
         }
 
-        private static decimal RgbToDecimal(byte value)
+        private static double RgbToDouble(byte value)
         {
-            var res = Math.Max(0, value / (decimal)byte.MaxValue);
+            var res = Math.Max(0, value / (double)byte.MaxValue);
             res = Math.Round(Math.Min(1, res), 4);
 
             return res;
         }
 
-        private static decimal CheckRgbDecimal(decimal value, string argument)
+        private static double CheckRgbDouble(double value, string argument)
         {
             if (value < 0)
             {
-                throw new ArgumentOutOfRangeException(argument, $"Provided decimal for RGB color was less than zero: {value}.");
+                throw new ArgumentOutOfRangeException(argument, $"Provided double for RGB color was less than zero: {value}.");
             }
 
             if (value > 1)
             {
-                throw new ArgumentOutOfRangeException(argument, $"Provided decimal for RGB color was greater than one: {value}.");
+                throw new ArgumentOutOfRangeException(argument, $"Provided double for RGB color was greater than one: {value}.");
             }
 
             return value;
@@ -764,7 +1090,6 @@
             bool HasContent { get; }
             void Add(IGraphicsStateOperation operation);
             IndirectReferenceToken Write(IPdfStreamWriter writer);
-
         }
 
         internal class DefaultContentStream : IPageContentStream
@@ -773,8 +1098,8 @@
 
             public DefaultContentStream() : this(new List<IGraphicsStateOperation>())
             {
-                
             }
+
             public DefaultContentStream(List<IGraphicsStateOperation> operations)
             {
                 this.operations = operations;
@@ -805,7 +1130,6 @@
 
                     return writer.WriteToken(stream);
                 }
-
             }
         }
 
@@ -814,7 +1138,7 @@
             private readonly IndirectReferenceToken token;
             public bool ReadOnly => true;
             public bool HasContent => true;
-            
+
             public CopiedContentStream(IndirectReferenceToken indirectReferenceToken)
             {
                 token = indirectReferenceToken;
@@ -830,7 +1154,7 @@
                 throw new NotSupportedException("Writing to a copied content stream is not supported.");
             }
 
-            public List<IGraphicsStateOperation> Operations => 
+            public List<IGraphicsStateOperation> Operations =>
                 throw new NotSupportedException("Reading raw operations is not supported from a copied content stream.");
         }
 
@@ -872,7 +1196,5 @@
                 Height = height;
             }
         }
-
-        
     }
 }

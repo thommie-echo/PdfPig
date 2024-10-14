@@ -2,6 +2,7 @@
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics.CodeAnalysis;
     using System.Globalization;
     using System.Linq;
     using Cmap;
@@ -30,7 +31,10 @@
         private readonly ISystemFontFinder systemFontFinder;
         private readonly IFontHandler type1FontHandler;
 
-        public TrueTypeFontHandler(ILog log, IPdfTokenScanner pdfScanner, ILookupFilterProvider filterProvider,
+        public TrueTypeFontHandler(
+            ILog log,
+            IPdfTokenScanner pdfScanner,
+            ILookupFilterProvider filterProvider,
             IEncodingReader encodingReader,
             ISystemFontFinder systemFontFinder,
             IFontHandler type1FontHandler)
@@ -45,11 +49,11 @@
 
         public IFont Generate(DictionaryToken dictionary)
         {
-            if (!dictionary.TryGetOptionalTokenDirect(NameToken.FirstChar, pdfScanner, out NumericToken firstCharacterToken)
+            if (!dictionary.TryGetOptionalTokenDirect(NameToken.FirstChar, pdfScanner, out NumericToken? firstCharacterToken)
                 || !dictionary.TryGet<IToken>(NameToken.FontDescriptor, pdfScanner, out _)
                 || !dictionary.TryGet(NameToken.Widths, out IToken _))
             {
-                if (!dictionary.TryGetOptionalTokenDirect(NameToken.BaseFont, pdfScanner, out NameToken baseFont))
+                if (!dictionary.TryGetOptionalTokenDirect(NameToken.BaseFont, pdfScanner, out NameToken? baseFont))
                 {
                     throw new InvalidFontFormatException($"The provided TrueType font dictionary did not contain a /FirstChar or a /BaseFont entry: {dictionary}.");
                 }
@@ -57,7 +61,7 @@
                 // Can use the AFM descriptor despite not being Type 1!
                 var standard14Font = Standard14.GetAdobeFontMetrics(baseFont.Data);
 
-                if (standard14Font == null)
+                if (standard14Font is null)
                 {
                     throw new InvalidFontFormatException($"The provided TrueType font dictionary did not have a /FirstChar and did not match a Standard 14 font: {dictionary}.");
                 }
@@ -66,20 +70,20 @@
 
                 var thisEncoding = encodingReader.Read(dictionary);
 
-                if (thisEncoding == null)
+                if (thisEncoding is null)
                 {
                     thisEncoding = new AdobeFontMetricsEncoding(standard14Font);
                 }
 
                 int? firstChar = null;
-                double[] widthsOverride = null;
+                double[]? widthsOverride = null;
 
                 if (dictionary.TryGet(NameToken.FirstChar, pdfScanner, out firstCharacterToken))
                 {
                     firstChar = firstCharacterToken.Int;
                 }
 
-                if (dictionary.TryGet(NameToken.Widths, pdfScanner, out ArrayToken widthsArray))
+                if (dictionary.TryGet(NameToken.Widths, pdfScanner, out ArrayToken? widthsArray))
                 {
                     widthsOverride = widthsArray.Data.OfType<NumericToken>()
                         .Select(x => x.Double).ToArray();
@@ -97,29 +101,34 @@
 
             var font = ParseTrueTypeFont(descriptor, out var actualHandler);
 
-            if (font == null && actualHandler != null)
+            if (font is null && actualHandler != null)
             {
                 return actualHandler.Generate(dictionary);
             }
 
             var name = FontDictionaryAccessHelper.GetName(pdfScanner, dictionary, descriptor);
 
-            CMap toUnicodeCMap = null;
+            CMap? toUnicodeCMap = null;
             if (dictionary.TryGet(NameToken.ToUnicode, out var toUnicodeObj))
             {
-                var toUnicode = DirectObjectFinder.Get<StreamToken>(toUnicodeObj, pdfScanner);
-
-                var decodedUnicodeCMap = toUnicode.Decode(filterProvider, pdfScanner);
-
-                if (decodedUnicodeCMap != null)
+                try
                 {
-                    toUnicodeCMap = CMapCache.Parse(new ByteArrayInputBytes(decodedUnicodeCMap));
+                    var toUnicode = DirectObjectFinder.Get<StreamToken>(toUnicodeObj, pdfScanner);
+
+                    if (toUnicode.Decode(filterProvider, pdfScanner) is ReadOnlyMemory<byte> decodedUnicodeCMap)
+                    {
+                        toUnicodeCMap = CMapCache.Parse(new MemoryInputBytes(decodedUnicodeCMap));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    log.Error("Failed to decode ToUnicode CMap for a TrueType font in file due to an exception.", ex);
                 }
             }
 
-            Encoding encoding = encodingReader.Read(dictionary, descriptor);
-            
-            if (encoding == null && font?.TableRegister?.CMapTable != null
+            Encoding? encoding = encodingReader.Read(dictionary, descriptor);
+
+            if (encoding is null && font?.TableRegister?.CMapTable != null
                                  && font.TableRegister.PostScriptTable?.GlyphNames != null)
             {
                 var postscript = font.TableRegister.PostScriptTable;
@@ -150,11 +159,11 @@
             return new TrueTypeSimpleFont(name, descriptor, toUnicodeCMap, encoding, font, firstCharacter, widths);
         }
 
-        private TrueTypeFont ParseTrueTypeFont(FontDescriptor descriptor, out IFontHandler actualHandler)
+        private TrueTypeFont? ParseTrueTypeFont(FontDescriptor descriptor, [NotNullWhen(true)] out IFontHandler? actualHandler)
         {
             actualHandler = null;
 
-            if (descriptor.FontFile == null)
+            if (descriptor.FontFile is null)
             {
                 try
                 {
@@ -179,7 +188,7 @@
                 {
                     var shouldThrow = true;
 
-                    if (fontFileStream.StreamDictionary.TryGet(NameToken.Subtype, pdfScanner, out NameToken subTypeName))
+                    if (fontFileStream.StreamDictionary.TryGet(NameToken.Subtype, pdfScanner, out NameToken? subTypeName))
                     {
                         if (subTypeName == NameToken.Type1C)
                         {
@@ -199,8 +208,8 @@
                             $"Expected a TrueType font in the TrueType font descriptor, instead it was {descriptor.FontFile.FileType}.");
                     }
                 }
-                
-                var font = TrueTypeFontParser.Parse(new TrueTypeDataBytes(new ByteArrayInputBytes(fontFile)));
+
+                var font = TrueTypeFontParser.Parse(new TrueTypeDataBytes(new MemoryInputBytes(fontFile)));
 
                 return font;
             }

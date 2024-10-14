@@ -1,4 +1,6 @@
-﻿namespace UglyToad.PdfPig.Filters
+﻿#nullable disable
+
+namespace UglyToad.PdfPig.Filters
 {
     using System;
     using System.Collections.Generic;
@@ -10,7 +12,7 @@
     /// The LZW (Lempel-Ziv-Welch) filter is a variable-length, adaptive compression method
     /// that has been adopted as one of the standard compression methods in the Tag Image File Format (TIFF) standard. 
     /// </summary>
-    internal class LzwFilter : IFilter
+    internal sealed class LzwFilter : IFilter
     {
         private const int DefaultColors = 1;
         private const int DefaultBitsPerComponent = 8;
@@ -27,7 +29,7 @@
         public bool IsSupported { get; } = true;
 
         /// <inheritdoc />
-        public byte[] Decode(IReadOnlyList<byte> input, DictionaryToken streamDictionary, int filterIndex)
+        public ReadOnlyMemory<byte> Decode(ReadOnlySpan<byte> input, DictionaryToken streamDictionary, int filterIndex)
         {
             var parameters = DecodeParameterResolver.GetFilterParameters(streamDictionary, filterIndex);
 
@@ -43,20 +45,16 @@
                 var bitsPerComponent = parameters.GetIntOrDefault(NameToken.BitsPerComponent, DefaultBitsPerComponent);
                 var columns = parameters.GetIntOrDefault(NameToken.Columns, DefaultColumns);
 
-                var result = PngPredictor.Decode(decompressed, predictor, colors, bitsPerComponent, columns);
-
-                return result;
+                return PngPredictor.Decode(decompressed, predictor, colors, bitsPerComponent, columns);
             }
 
-            var data = Decode(input, earlyChange == 1);
-
-            return data;
+            return Decode(input, earlyChange == 1);
         }
 
-        private static byte[] Decode(IReadOnlyList<byte> input, bool isEarlyChange)
+        private static byte[] Decode(ReadOnlySpan<byte> input, bool isEarlyChange)
         {
             // A guess.
-            var result = new List<byte>((int)(input.Count * 1.5));
+            var result = new List<byte>((int)(input.Length * 1.5));
 
             var table = GetDefaultTable();
 
@@ -146,7 +144,7 @@
 
             for (var i = 0; i < 256; i++)
             {
-                table[i] = new[] { (byte)i };
+                table[i] = [(byte)i];
             }
 
             table[ClearTable] = null;

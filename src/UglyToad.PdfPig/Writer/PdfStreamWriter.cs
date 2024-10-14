@@ -1,11 +1,11 @@
 ﻿namespace UglyToad.PdfPig.Writer
 {
+    using Core;
+    using Graphics.Operations;
     using System;
     using System.Collections.Generic;
     using System.Globalization;
     using System.IO;
-    using Core;
-    using Graphics.Operations;
     using Tokens;
 
     /// <summary>
@@ -13,24 +13,41 @@
     /// </summary>
     internal class PdfStreamWriter : IPdfStreamWriter
     {
-        protected const decimal DefaultVersion = 1.2m;
+        private readonly Action<double>? recordVersion;
+        protected const double DefaultVersion = 1.2;
         protected Dictionary<IndirectReference, long> offsets = new Dictionary<IndirectReference, long>();
         protected bool DisposeStream { get; set; }
         protected bool Initialized { get; set; }
         protected int CurrentNumber { get; set; } = 1;
+        protected readonly ITokenWriter TokenWriter;
 
-        internal PdfStreamWriter(Stream baseStream, bool disposeStream = true)
+        public Stream Stream { get; protected set; }
+
+        public bool AttemptDeduplication { get; set; } = true;
+
+        public bool WritingPageContents
+        {
+            get => TokenWriter.WritingPageContents;
+            set => TokenWriter.WritingPageContents = value;
+        }
+
+        internal PdfStreamWriter(
+            Stream baseStream,
+            bool disposeStream = true,
+            ITokenWriter? tokenWriter = null,
+            Action<double>? recordVersion = null)
         {
             Stream = baseStream ?? throw new ArgumentNullException(nameof(baseStream));
+
             if (!baseStream.CanWrite)
             {
                 throw new ArgumentException("Output stream must be writable");
             }
 
+            this.recordVersion = recordVersion;
             DisposeStream = disposeStream;
+            TokenWriter = tokenWriter ?? new TokenWriter();
         }
-
-        public Stream Stream { get; protected set; }
 
         public virtual IndirectReferenceToken WriteToken(IToken token)
         {
@@ -64,30 +81,23 @@
             return new IndirectReferenceToken(new IndirectReference(CurrentNumber++, 0));
         }
 
-        public void InitializePdf(decimal version)
+        public void InitializePdf(double version)
         {
-            WriteString($"%PDF-{version.ToString("0.0", CultureInfo.InvariantCulture)}", Stream);
+            recordVersion?.Invoke(version);
 
-            Stream.WriteText("%");
-            Stream.WriteByte(169);
-            Stream.WriteByte(205);
-            Stream.WriteByte(196);
-            Stream.WriteByte(210);
+            Stream.WriteText($"%PDF-{version.ToString("0.0", CultureInfo.InvariantCulture)}");
+            Stream.WriteNewLine();
+            Stream.WriteText("%"u8);
+            Stream.Write([169, 205, 196, 210]);
             Stream.WriteNewLine();
             Initialized = true;
         }
 
-        public void CompletePdf(IndirectReferenceToken catalogReference, IndirectReferenceToken documentInformationReference = null)
+        public void CompletePdf(IndirectReferenceToken catalogReference, IndirectReferenceToken? documentInformationReference = null)
         {
             TokenWriter.WriteCrossReferenceTable(offsets, catalogReference.Data, Stream, documentInformationReference?.Data);
         }
 
-        private static void WriteString(string text, Stream stream)
-        {
-            var bytes = OtherEncodings.StringAsLatin1Bytes(text);
-            stream.Write(bytes, 0, bytes.Length);
-            stream.WriteNewLine();
-        }
 
         public void Dispose()
         {
@@ -96,7 +106,7 @@
                 Stream?.Dispose();
             }
             
-            Stream = null;
+            Stream = null!;
         }
     }
 }

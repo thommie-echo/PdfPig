@@ -1,9 +1,12 @@
 ﻿namespace UglyToad.PdfPig.Content
 {
+    using System;
     using System.Collections.Generic;
+    using System.Diagnostics.CodeAnalysis;
     using Core;
     using Graphics.Colors;
     using Graphics.Core;
+    using UglyToad.PdfPig.Tokens;
     using XObjects;
 
     /// <summary>
@@ -27,27 +30,21 @@
         int HeightInSamples { get; }
 
         /// <summary>
-        /// The <see cref="ColorSpace"/> used to interpret the image.
-        /// This defines the number of color components per sample, e.g.
-        /// 1 component for <see cref="Graphics.Colors.ColorSpace.DeviceGray"/>,
-        /// 3 components for <see cref="Graphics.Colors.ColorSpace.DeviceRGB"/>,
-        /// 4 components for <see cref="Graphics.Colors.ColorSpace.DeviceCMYK"/>,
-        /// etc.
-        /// This is not defined where <see cref="IsImageMask"/> is <see langword="true"/> and is optional where the image is JPXEncoded for <see cref="XObjectImage"/>.
-        /// </summary>
-        ColorSpace? ColorSpace { get; }
-
-        /// <summary>
         /// The number of bits used to represent each color component.
         /// </summary>
         int BitsPerComponent { get; }
 
         /// <summary>
-        /// The encoded bytes of the image with all filters still applied.
+        /// The encoded memory of the image with all filters still applied.
         /// </summary>
-        IReadOnlyList<byte> RawBytes { get; }
+        ReadOnlyMemory<byte> RawMemory { get; }
 
-            /// <summary>
+        /// <summary>
+        /// The encoded memory span of the image with all filters still applied.
+        /// </summary>
+        ReadOnlySpan<byte> RawBytes { get; }
+
+        /// <summary>
         /// The color rendering intent to be used when rendering the image.
         /// </summary>
         RenderingIntent RenderingIntent { get; }
@@ -70,7 +67,7 @@
         /// The value from the image data is then interpolated into the values relevant to the <see cref="ColorSpace"/>
         /// using the corresponding values of the decode array.
         /// </summary>
-        IReadOnlyList<decimal> Decode { get; }
+        IReadOnlyList<double> Decode { get; }
 
         /// <summary>
         /// Specifies whether interpolation is to be performed. Interpolation smooths images where a single component in the image
@@ -85,19 +82,27 @@
         bool IsInlineImage { get; }
 
         /// <summary>
-        /// Full details for the <see cref="ColorSpace"/> with any associated data.
+        /// The full dictionary for this image object.
         /// </summary>
-        ColorSpaceDetails ColorSpaceDetails { get; }
+        DictionaryToken ImageDictionary { get; }
 
         /// <summary>
-        /// Get the decoded bytes of the image if applicable. For JPEG images and some other types the
-        /// <see cref="RawBytes"/> should be used directly.
+        /// The <see cref="ColorSpaceDetails"/> used to interpret the image.
+        /// <para>
+        /// This is not defined where <see cref="IsImageMask"/> is <see langword="true"/> and is optional where the image is JPXEncoded for <see cref="XObjectImage"/>.
+        /// </para>
         /// </summary>
-        bool TryGetBytes(out IReadOnlyList<byte> bytes);
+        ColorSpaceDetails? ColorSpaceDetails { get; }
+
+        /// <summary>
+        /// Get the decoded memory of the image if applicable. For JPEG images and some other types the
+        /// <see cref="RawMemory"/> should be used directly.
+        /// </summary>
+        bool TryGetBytesAsMemory(out ReadOnlyMemory<byte> memory);
 
         /// <summary>
         /// Try to convert the image to PNG. Doesn't support conversion of JPG to PNG.
         /// </summary>
-        bool TryGetPng(out byte[] bytes);
+        bool TryGetPng([NotNullWhen(true)] out byte[]? bytes);
     }
 }

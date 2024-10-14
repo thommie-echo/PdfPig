@@ -36,20 +36,21 @@
 
         /// <summary>
         /// Maps from a <see cref="NameToken"/> to the corresponding <see cref="ColorSpace"/> if one exists.
+        /// <para>Includes extended color spaces.</para>
         /// </summary>
         public static bool TryMapToColorSpace(this NameToken name, out ColorSpace colorspace)
         {
             colorspace = ColorSpace.DeviceGray;
 
-            if (name.Data == NameToken.Devicegray.Data)
+            if (name.Data == NameToken.Devicegray.Data || name.Data == "G")
             {
                 colorspace = ColorSpace.DeviceGray;
             }
-            else if (name.Data == NameToken.Devicergb.Data)
+            else if (name.Data == NameToken.Devicergb.Data || name.Data == "RGB")
             {
                 colorspace = ColorSpace.DeviceRGB;
             }
-            else if (name.Data == NameToken.Devicecmyk.Data)
+            else if (name.Data == NameToken.Devicecmyk.Data || name.Data == "CMYK")
             {
                 colorspace = ColorSpace.DeviceCMYK;
             }
@@ -69,7 +70,7 @@
             {
                 colorspace = ColorSpace.ICCBased;
             }
-            else if (name.Data == NameToken.Indexed.Data)
+            else if (name.Data == NameToken.Indexed.Data || name.Data == "I")
             {
                 colorspace = ColorSpace.Indexed;
             }
@@ -98,33 +99,20 @@
         /// </summary>
         public static NameToken ToNameToken(this ColorSpace colorSpace)
         {
-            switch (colorSpace)
-            {
-                case ColorSpace.DeviceGray:
-                    return NameToken.Devicegray;
-                case ColorSpace.DeviceRGB:
-                    return NameToken.Devicergb;
-                case ColorSpace.DeviceCMYK:
-                    return NameToken.Devicecmyk;
-                case ColorSpace.CalGray:
-                    return NameToken.Calgray;
-                case ColorSpace.CalRGB:
-                    return NameToken.Calrgb;
-                case ColorSpace.Lab:
-                    return NameToken.Lab;
-                case ColorSpace.ICCBased:
-                    return NameToken.Iccbased;
-                case ColorSpace.Indexed:
-                    return NameToken.Indexed;
-                case ColorSpace.Pattern:
-                    return NameToken.Pattern;
-                case ColorSpace.Separation:
-                    return NameToken.Separation;
-                case ColorSpace.DeviceN:
-                    return NameToken.Devicen;
-                default:
-                    throw new ArgumentException($"Unrecognized colorspace: {colorSpace}.");
-            }
+            return colorSpace switch {
+                ColorSpace.DeviceGray => NameToken.Devicegray,
+                ColorSpace.DeviceRGB  => NameToken.Devicergb,
+                ColorSpace.DeviceCMYK => NameToken.Devicecmyk,
+                ColorSpace.CalGray    => NameToken.Calgray,
+                ColorSpace.CalRGB     => NameToken.Calrgb,
+                ColorSpace.Lab        => NameToken.Lab,
+                ColorSpace.ICCBased   => NameToken.Iccbased,
+                ColorSpace.Indexed    => NameToken.Indexed,
+                ColorSpace.Pattern    => NameToken.Pattern,
+                ColorSpace.Separation => NameToken.Separation,
+                ColorSpace.DeviceN    => NameToken.Devicen,
+                _ => throw new ArgumentException($"Unrecognized colorspace: {colorSpace}.")
+            };
         }
     }
 }

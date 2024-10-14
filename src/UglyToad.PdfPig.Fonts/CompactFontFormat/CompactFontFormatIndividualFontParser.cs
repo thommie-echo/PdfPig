@@ -2,7 +2,6 @@
 {
     using System;
     using System.Collections.Generic;
-    using System.Linq;
     using Charsets;
     using CharStrings;
     using Core;
@@ -23,7 +22,7 @@
             this.privateDictionaryReader = privateDictionaryReader;
         }
 
-        public CompactFontFormatFont Parse(CompactFontFormatData data, string name, IReadOnlyList<byte> topDictionaryIndex, IReadOnlyList<string> stringIndex,
+        public CompactFontFormatFont Parse(CompactFontFormatData data, string name, ReadOnlySpan<byte> topDictionaryIndex, ReadOnlySpan<string> stringIndex,
             CompactFontFormatIndex globalSubroutineIndex)
         {
             var individualData = new CompactFontFormatData(topDictionaryIndex.ToArray());
@@ -127,8 +126,10 @@
             return new CompactFontFormatFont(topDictionary, privateDictionary, charset, Union<Type1CharStrings, Type2CharStrings>.Two(charStrings), fontEncoding);
         }
 
-        private static ICompactFontFormatCharset ReadCharset(CompactFontFormatData data, CompactFontFormatTopLevelDictionary topDictionary,
-        CompactFontFormatIndex charStringIndex, IReadOnlyList<string> stringIndex)
+        private static ICompactFontFormatCharset ReadCharset(CompactFontFormatData data,
+            CompactFontFormatTopLevelDictionary topDictionary,
+            CompactFontFormatIndex charStringIndex,
+            ReadOnlySpan<string> stringIndex)
         {
             data.Seek(topDictionary.CharSetOffset);
 
@@ -138,55 +139,55 @@
             {
                 case 0:
                     {
-                        var glyphToNamesAndStringId = new List<(int glyphId, int stringId, string name)>();
+                        using var glyphToNamesAndStringId = new ArrayPoolBufferWriter<(int glyphId, int stringId, string name)>();
 
                         for (var glyphId = 1; glyphId < charStringIndex.Count; glyphId++)
                         {
                             var stringId = data.ReadSid();
-                            glyphToNamesAndStringId.Add((glyphId, stringId, ReadString(stringId, stringIndex)));
+                            glyphToNamesAndStringId.Write((glyphId, stringId, ReadString(stringId, stringIndex)));
                         }
 
-                        return new CompactFontFormatFormat0Charset(glyphToNamesAndStringId);
+                        return new CompactFontFormatFormat0Charset(glyphToNamesAndStringId.WrittenSpan);
                     }
                 case 1:
                 case 2:
                     {
-                        var glyphToNamesAndStringId = new List<(int glyphId, int stringId, string name)>();
+                        using var glyphToNamesAndStringId = new ArrayPoolBufferWriter<(int glyphId, int stringId, string name)>();
 
                         for (var glyphId = 1; glyphId < charStringIndex.Count; glyphId++)
                         {
                             var firstSid = data.ReadSid();
                             var numberInRange = format == 1 ? data.ReadCard8() : data.ReadCard16();
 
-                            glyphToNamesAndStringId.Add((glyphId, firstSid, ReadString(firstSid, stringIndex)));
+                            glyphToNamesAndStringId.Write((glyphId, firstSid, ReadString(firstSid, stringIndex)));
                             for (var i = 0; i < numberInRange; i++)
                             {
                                 glyphId++;
                                 var sid = firstSid + i + 1;
-                                glyphToNamesAndStringId.Add((glyphId, sid, ReadString(sid, stringIndex)));
+                                glyphToNamesAndStringId.Write((glyphId, sid, ReadString(sid, stringIndex)));
                             }
                         }
 
                         if (format == 1)
                         {
 
-                            return new CompactFontFormatFormat1Charset(glyphToNamesAndStringId);
+                            return new CompactFontFormatFormat1Charset(glyphToNamesAndStringId.WrittenSpan);
                         }
 
-                        return new CompactFontFormatFormat2Charset(glyphToNamesAndStringId);
+                        return new CompactFontFormatFormat2Charset(glyphToNamesAndStringId.WrittenSpan);
                     }
                 default:
                     throw new InvalidOperationException($"Unrecognized format for the Charset table in a CFF font. Got: {format}.");
             }
         }
 
-        private static string ReadString(int index, IReadOnlyList<string> stringIndex)
+        private static string ReadString(int index, ReadOnlySpan<string> stringIndex)
         {
             if (index >= 0 && index <= 390)
             {
                 return CompactFontFormatStandardStrings.GetName(index);
             }
-            if (index - 391 < stringIndex.Count)
+            if (index - 391 < stringIndex.Length)
             {
                 return stringIndex[index - 391];
             }
@@ -213,9 +214,10 @@
             }
         }
 
-        private CompactFontFormatCidFont ReadCidFont(CompactFontFormatData data, CompactFontFormatTopLevelDictionary topLevelDictionary,
+        private CompactFontFormatCidFont ReadCidFont(CompactFontFormatData data,
+            CompactFontFormatTopLevelDictionary topLevelDictionary,
             int numberOfGlyphs,
-            IReadOnlyList<string> stringIndex,
+            ReadOnlySpan<string> stringIndex,
             CompactFontFormatPrivateDictionary privateDictionary,
             ICompactFontFormatCharset charset,
             CompactFontFormatIndex globalSubroutines,
@@ -397,7 +399,7 @@
             return 0;
         }
 
-        internal struct Range3
+        internal readonly struct Range3
         {
             public int First { get; }
 
@@ -415,7 +417,4 @@
             }
         }
     }
-
-
-
 }

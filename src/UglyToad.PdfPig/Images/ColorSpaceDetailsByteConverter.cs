@@ -1,11 +1,8 @@
 ﻿namespace UglyToad.PdfPig.Images
 {
-    using System;
-    using System.Collections.Generic;
-    using System.Linq;
     using Content;
-    using Core;
     using Graphics.Colors;
+    using System;
 
     /// <summary>
     /// Utility for working with the bytes in <see cref="IPdfImage"/>s and converting according to their <see cref="ColorSpaceDetails"/>.s
@@ -13,128 +10,92 @@
     public static class ColorSpaceDetailsByteConverter
     {
         /// <summary>
-        /// Converts the output bytes (if available) of <see cref="IPdfImage.TryGetBytes"/>
+        /// Converts the output bytes (if available) of <see cref="IPdfImage.TryGetBytesAsMemory"/>
         /// to actual pixel values using the <see cref="IPdfImage.ColorSpaceDetails"/>. For most images this doesn't
         /// change the data but for <see cref="ColorSpace.Indexed"/> it will convert the bytes which are indexes into the
         /// real pixel data into the real pixel data.
         /// </summary>
-        public static byte[] Convert(ColorSpaceDetails details, IReadOnlyList<byte> decoded, int bitsPerComponent, int imageWidth, int imageHeight)
+        public static ReadOnlySpan<byte> Convert(ColorSpaceDetails details, ReadOnlySpan<byte> decoded, int bitsPerComponent, int imageWidth, int imageHeight)
         {
-            if (decoded == null)
+            if (decoded.IsEmpty)
             {
-                return EmptyArray<byte>.Instance;
+                return [];
             }
 
-            if (details == null)
+            if (details is null)
             {
-                return decoded.ToArray();
+                return decoded;
             }
 
-            switch (details)
+            // TODO - We should aim at removing this alloc.
+            // The decoded input variable needs to become a Span<byte>
+            Span<byte> data = decoded.ToArray();
+
+            if (bitsPerComponent != 8)
             {
-                case IndexedColorSpaceDetails indexed:
-                    if (bitsPerComponent != 8)
-                    {
-                        // To ease unwrapping further below the indices are unpacked to occupy a single byte each
-                        decoded = UnpackIndices(decoded, bitsPerComponent);
-
-                        // Remove padding bytes when the stride width differs from the image width
-                        var stride = (imageWidth * bitsPerComponent + 7) / 8;
-                        var strideWidth = stride * (8 / bitsPerComponent);
-                        if (strideWidth != imageWidth)
-                        {
-                            decoded = RemoveStridePadding(decoded.ToArray(), strideWidth, imageWidth, imageHeight);
-                        }
-                    }
-
-                    return UnwrapIndexedColorSpaceBytes(indexed, decoded);
+                // Unpack components such that they occupy one byte each
+                data = UnpackComponents(data, bitsPerComponent);
             }
 
-            return decoded.ToArray();
+            // Remove padding bytes when the stride width differs from the image width
+            var bytesPerPixel = details.NumberOfColorComponents;
+            var strideWidth = data.Length / imageHeight / bytesPerPixel;
+            if (strideWidth != imageWidth)
+            {
+                data = RemoveStridePadding(data, strideWidth, imageWidth, imageHeight, bytesPerPixel);
+            }
+
+            return details.Transform(data);
         }
 
-        private static byte[] UnpackIndices(IReadOnlyList<byte> input, int bitsPerComponent)
+        private static Span<byte> UnpackComponents(Span<byte> input, int bitsPerComponent)
         {
-                IEnumerable<byte> Unpack(byte b)
+            if (bitsPerComponent == 16) // Example with MOZILLA-3136-0.pdf (page 3)
+            {
+                int size = input.Length / 2;
+                var unpacked16 = input.Slice(0, size); // In place
+
+                for (int b = 0; b < size; ++b)
                 {
-                    // Enumerate bits in bitsPerComponent-sized chunks from MSB to LSB, masking on the appropriate bits
-                    for (int i = 8 - bitsPerComponent; i >= 0; i -= bitsPerComponent)
-                    {
-                        yield return (byte)((b >> i) & ((int)Math.Pow(2, bitsPerComponent) - 1));
-                    }
+                    int i = 2 * b;
+                    // Convert to UInt16 and divide by 256
+                    unpacked16[b] = (byte)((ushort)(input[i + 1] | input[i] << 8) / 256);
                 }
-               
-                return input.SelectMany(b => Unpack(b)).ToArray();
+
+                return unpacked16;
+            }
+
+            int end = 8 - bitsPerComponent;
+
+            Span<byte> unpacked = new byte[input.Length * (int)Math.Ceiling((end + 1) / (double)bitsPerComponent)];
+
+            int right = (int)Math.Pow(2, bitsPerComponent) - 1;
+
+            int u = 0;
+            foreach (byte b in input)
+            {
+                // Enumerate bits in bitsPerComponent-sized chunks from MSB to LSB, masking on the appropriate bits
+                for (int i = end; i >= 0; i -= bitsPerComponent)
+                {
+                    unpacked[u++] = (byte)((b >> i) & right);
+                }
+            }
+
+            return unpacked;
         }
 
-        private static byte[] RemoveStridePadding(byte[] input, int strideWidth, int imageWidth, int imageHeight)
+
+        private static Span<byte> RemoveStridePadding(Span<byte> input, int strideWidth, int imageWidth, int imageHeight, int multiplier)
         {
-            var result = new byte[imageWidth * imageHeight];
+            Span<byte> result = new byte[imageWidth * imageHeight * multiplier];
             for (int y = 0; y < imageHeight; y++)
             {
                 int sourceIndex = y * strideWidth;
                 int targetIndex = y * imageWidth;
-                Array.Copy(input, sourceIndex, result, targetIndex, imageWidth);
+                input.Slice(sourceIndex, imageWidth).CopyTo(result.Slice(targetIndex, imageWidth));
             }
 
             return result;
-        }
-
-        private static byte[] UnwrapIndexedColorSpaceBytes(IndexedColorSpaceDetails indexed, IReadOnlyList<byte> input)
-        {
-            var multiplier = 1;
-            Func<byte, IEnumerable<byte>> transformer = null;
-            switch (indexed.BaseColorSpaceDetails.Type)
-            {
-                case ColorSpace.DeviceRGB:
-                    transformer = x =>
-                    {
-                        var r = new byte[3];
-                        for (var i = 0; i < 3; i++)
-                        {
-                            r[i] = indexed.ColorTable[x * 3 + i];
-                        }
-
-                        return r;
-                    };
-                    multiplier = 3;
-                    break;
-                case ColorSpace.DeviceCMYK:
-                    transformer = x =>
-                    {
-                        var r = new byte[4];
-                        for (var i = 0; i < 4; i++)
-                        {
-                            r[i] = indexed.ColorTable[x * 4 + i];
-                        }
-
-                        return r;
-                    };
-
-                    multiplier = 4;
-                    break;
-                case ColorSpace.DeviceGray:
-                    transformer = x => new[] { indexed.ColorTable[x] };
-                    multiplier = 1;
-                    break;
-            }
-
-            if (transformer != null)
-            {
-                var result = new byte[input.Count * multiplier];
-                var i = 0;
-                foreach (var b in input)
-                {
-                    foreach (var newByte in transformer(b))
-                    {
-                        result[i++] = newByte;
-                    }
-                }
-
-                return result;
-            }
-
-            return input.ToArray();
         }
     }
 }

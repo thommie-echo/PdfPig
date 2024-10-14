@@ -1,15 +1,13 @@
 ﻿// ReSharper disable CompareOfFloatsByEqualityOperator
 namespace UglyToad.PdfPig.Tests.Fonts.TrueType.Parser
 {
-    using System;
-    using System.Globalization;
-    using System.Text;
-    using System.Text.RegularExpressions;
     using PdfPig.Core;
     using PdfPig.Fonts.TrueType;
     using PdfPig.Fonts.TrueType.Parser;
     using PdfPig.Fonts.TrueType.Tables;
-    using Xunit;
+    using System.Globalization;
+    using System.Text;
+    using System.Text.RegularExpressions;
 
     public class TrueTypeFontParserTests
     {
@@ -18,7 +16,7 @@ namespace UglyToad.PdfPig.Tests.Fonts.TrueType.Parser
         {
             var bytes = TrueTypeTestHelper.GetFileBytes("Roboto-Regular");
 
-            var input = new TrueTypeDataBytes(new ByteArrayInputBytes(bytes));
+            var input = new TrueTypeDataBytes(new MemoryInputBytes(bytes));
 
             var font = TrueTypeFontParser.Parse(input);
 
@@ -92,13 +90,13 @@ namespace UglyToad.PdfPig.Tests.Fonts.TrueType.Parser
 
             var bytes = TrueTypeTestHelper.GetFileBytes("Roboto-Regular");
 
-            var input = new TrueTypeDataBytes(new ByteArrayInputBytes(bytes));
+            var input = new TrueTypeDataBytes(new MemoryInputBytes(bytes));
 
             var font = TrueTypeFontParser.Parse(input);
 
             foreach (var s in data)
             {
-                var parts = s.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                var parts = s.Split(' ').Where(x => x.Length > 0).ToArray();
 
                 var name = parts[0];
 
@@ -124,7 +122,7 @@ namespace UglyToad.PdfPig.Tests.Fonts.TrueType.Parser
         {
             var bytes = TrueTypeTestHelper.GetFileBytes("google-simple-doc");
 
-            var input = new TrueTypeDataBytes(new ByteArrayInputBytes(bytes));
+            var input = new TrueTypeDataBytes(new MemoryInputBytes(bytes));
 
             var font = TrueTypeFontParser.Parse(input);
 
@@ -136,7 +134,7 @@ namespace UglyToad.PdfPig.Tests.Fonts.TrueType.Parser
         {
             var bytes = TrueTypeTestHelper.GetFileBytes("Andada-Regular");
 
-            var input = new TrueTypeDataBytes(new ByteArrayInputBytes(bytes));
+            var input = new TrueTypeDataBytes(new MemoryInputBytes(bytes));
 
             var font = TrueTypeFontParser.Parse(input);
 
@@ -144,7 +142,7 @@ namespace UglyToad.PdfPig.Tests.Fonts.TrueType.Parser
 
             Assert.Equal("Andada Regular", name);
 
-            Assert.Equal(1.001999, font.TableRegister.HeaderTable.Revision, new DoubleComparer(5));
+            Assert.Equal(1.001999, font.TableRegister.HeaderTable.Revision, new DoubleComparer(0.00001));
 
             Assert.Equal(11, font.TableRegister.HeaderTable.Flags);
 
@@ -164,7 +162,7 @@ namespace UglyToad.PdfPig.Tests.Fonts.TrueType.Parser
         {
             var bytes = TrueTypeTestHelper.GetFileBytes("PMingLiU");
 
-            var input = new TrueTypeDataBytes(new ByteArrayInputBytes(bytes));
+            var input = new TrueTypeDataBytes(new MemoryInputBytes(bytes));
 
             var font = TrueTypeFontParser.Parse(input);
 
@@ -178,12 +176,12 @@ namespace UglyToad.PdfPig.Tests.Fonts.TrueType.Parser
 
             var bytes = TrueTypeTestHelper.GetFileBytes("Roboto-Regular");
 
-            var input = new TrueTypeDataBytes(new ByteArrayInputBytes(bytes));
+            var input = new TrueTypeDataBytes(new MemoryInputBytes(bytes));
 
             var font = TrueTypeFontParser.Parse(input);
 
             var robotoGlyphs = Encoding.ASCII.GetString(TrueTypeTestHelper.GetFileBytes("Roboto-Regular.GlyphData.txt"));
-            var lines = robotoGlyphs.Split(new[] {"\r\n", "\r", "\n"}, StringSplitOptions.RemoveEmptyEntries);
+            var lines = robotoGlyphs.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries);
 
             for (var i = 0; i < lines.Length; i++)
             {
@@ -205,9 +203,16 @@ namespace UglyToad.PdfPig.Tests.Fonts.TrueType.Parser
                 {
                     Assert.Equal(width, glyph.Bounds.Width);
                 }
-                
+
                 Assert.Equal(height, glyph.Bounds.Height);
                 Assert.Equal(points, glyph.Points.Length);
+                if (points > 0)
+                {
+                    Assert.True(glyph.Points[glyph.Points.Length - 1].IsEndOfContour);
+                    Assert.True(glyph.TryGetGlyphPath(out var subpaths));
+
+                    // TODO - more tests on path
+                }
             }
         }
 
@@ -216,7 +221,7 @@ namespace UglyToad.PdfPig.Tests.Fonts.TrueType.Parser
         {
             var bytes = TrueTypeTestHelper.GetFileBytes("issue-258-corrupt-name-table");
 
-            var input = new TrueTypeDataBytes(new ByteArrayInputBytes(bytes));
+            var input = new TrueTypeDataBytes(new MemoryInputBytes(bytes));
 
             var font = TrueTypeFontParser.Parse(input);
 
@@ -226,4 +231,3 @@ namespace UglyToad.PdfPig.Tests.Fonts.TrueType.Parser
         }
     }
 }
-

@@ -1,6 +1,5 @@
 ﻿namespace UglyToad.PdfPig.Parser.Parts.CrossReference
 {
-    using System.Collections.Generic;
     using Core;
     using Filters;
     using PdfPig.CrossReference;
@@ -19,13 +18,13 @@
         /// <summary>
         /// Parses through the unfiltered stream and populates the xrefTable HashMap.
         /// </summary>
-        public CrossReferenceTablePart Parse(long streamOffset, StreamToken stream)
+        public CrossReferenceTablePart Parse(long streamOffset, long? fromTableAtOffset, StreamToken stream)
         {
-            var decoded = stream.Decode(filterProvider);
+            var decoded = stream.Decode(filterProvider).Span;
 
             var fieldSizes = new CrossReferenceStreamFieldSize(stream.StreamDictionary);
 
-            var lineCount = decoded.Count / fieldSizes.LineLength;
+            var lineCount = decoded.Length / fieldSizes.LineLength;
             
             long previousOffset = -1;
             if (stream.StreamDictionary.TryGet(NameToken.Prev, out var prevToken) && prevToken is NumericToken prevNumeric)
@@ -38,13 +37,17 @@
                 Offset = streamOffset,
                 Previous = previousOffset,
                 Dictionary = stream.StreamDictionary,
-                XRefType = CrossReferenceType.Stream
+                XRefType = CrossReferenceType.Stream,
+                TiedToPreviousAtOffset = fromTableAtOffset
             };
 
             var objectNumbers = GetObjectNumbers(stream.StreamDictionary);
 
             var lineNumber = 0;
-            var lineBuffer = new byte[fieldSizes.LineLength];
+            Span<byte> lineBuffer = fieldSizes.LineLength <= 64
+                ? stackalloc byte[fieldSizes.LineLength]
+                : new byte[fieldSizes.LineLength];
+
             foreach (var objectNumber in objectNumbers)
             {
                 if (lineNumber >= lineCount)
@@ -83,7 +86,7 @@
         }
 
         private static void ReadNextStreamObject(int type, long objectNumber, CrossReferenceStreamFieldSize fieldSizes,
-            CrossReferenceTablePartBuilder builder, byte[] lineBuffer)
+            CrossReferenceTablePartBuilder builder, ReadOnlySpan<byte> lineBuffer)
         {
             switch (type)
             {

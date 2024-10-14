@@ -2,7 +2,6 @@
 {
     using System;
     using System.Collections.Generic;
-    using System.IO;
     using System.Linq;
     using Core;
     using PdfFonts;
@@ -15,7 +14,7 @@
     internal class TrueTypeWritingFont : IWritingFont
     {
         private readonly TrueTypeFont font;
-        private readonly IReadOnlyList<byte> fontFileBytes;
+        private readonly ReadOnlyMemory<byte> fontFileBytes;
 
         private readonly object mappingLock = new object();
         private readonly Dictionary<char, byte> characterMapping = new Dictionary<char, byte>();
@@ -25,7 +24,7 @@
 
         public string Name => font.Name;
 
-        public TrueTypeWritingFont(TrueTypeFont font, IReadOnlyList<byte> fontFileBytes)
+        public TrueTypeWritingFont(TrueTypeFont font, ReadOnlyMemory<byte> fontFileBytes)
         {
             this.font = font;
             this.fontFileBytes = fontFileBytes;
@@ -47,7 +46,7 @@
             return TransformationMatrix.FromValues(1.0 / unitsPerEm, 0, 0, 1.0 / unitsPerEm, 0, 0);
         }
 
-        public IndirectReferenceToken  WriteFont(IPdfStreamWriter writer, IndirectReferenceToken reservedIndirect=null)
+        public IndirectReferenceToken  WriteFont(IPdfStreamWriter writer, IndirectReferenceToken? reservedIndirect = null)
         {
             var newEncoding = new TrueTypeSubsetEncoding(characterMapping.Keys.ToList());
             var subsetBytes = TrueTypeSubsetter.Subset(fontFileBytes.ToArray(), newEncoding);
@@ -63,7 +62,7 @@
 
             var bbox = font.TableRegister.HeaderTable.Bounds;
 
-            var scaling = 1000m / font.TableRegister.HeaderTable.UnitsPerEm;
+            var scaling = 1000.0 / font.TableRegister.HeaderTable.UnitsPerEm;
             var descriptorDictionary = new Dictionary<NameToken, IToken>
             {
                 { NameToken.Type, NameToken.FontDescriptor },
@@ -71,7 +70,7 @@
                 // TODO: get flags TrueTypeEmbedder.java
                 { NameToken.Flags, new NumericToken((int)FontDescriptorFlags.Symbolic) },
                 { NameToken.FontBbox, GetBoundingBox(bbox, scaling) },
-                { NameToken.ItalicAngle, new NumericToken((decimal)postscript.ItalicAngle) },
+                { NameToken.ItalicAngle, new NumericToken(postscript.ItalicAngle) },
                 { NameToken.Ascent, new NumericToken(Math.Round(hhead.Ascent * scaling, 2)) },
                 { NameToken.Descent, new NumericToken(Math.Round(hhead.Descent * scaling, 2)) },
                 { NameToken.CapHeight, new NumericToken(90) },
@@ -80,7 +79,7 @@
             };
 
             var os2 = font.TableRegister.Os2Table;
-            if (os2 == null)
+            if (os2 is null)
             {
                 throw new InvalidFontFormatException("Embedding TrueType font requires OS/2 table.");
             }
@@ -91,7 +90,7 @@
                 descriptorDictionary[NameToken.Xheight] = new NumericToken(twoPlus.XHeight);
             }
 
-            descriptorDictionary[NameToken.StemV] = new NumericToken(((decimal)bbox.Width) * scaling * 0.13m);
+            descriptorDictionary[NameToken.StemV] = new NumericToken(bbox.Width * scaling * 0.13);
 
             var lastCharacter = 0;
             var widths = new List<NumericToken> { NumericToken.Zero };
@@ -103,7 +102,7 @@
                 }
 
                 var glyphId = font.WindowsUnicodeCMap.CharacterCodeToGlyphIndex(kvp.Key);
-                var width = decimal.Round(font.TableRegister.HorizontalMetricsTable.GetAdvanceWidth(glyphId) * scaling, 2);
+                var width = Math.Round(font.TableRegister.HorizontalMetricsTable.GetAdvanceWidth(glyphId) * scaling, 2);
 
                 widths.Add(new NumericToken(width));
             }
@@ -162,14 +161,14 @@
             }
         }
 
-        private static ArrayToken GetBoundingBox(PdfRectangle boundingBox, decimal scaling)
+        private static ArrayToken GetBoundingBox(PdfRectangle boundingBox, double scaling)
         {
             return new ArrayToken(new[]
             {
-                new NumericToken(Math.Round((decimal)boundingBox.Left * scaling, 2)),
-                new NumericToken(Math.Round((decimal)boundingBox.Bottom * scaling, 2)),
-                new NumericToken(Math.Round((decimal)boundingBox.Right * scaling, 2)),
-                new NumericToken(Math.Round((decimal)boundingBox.Top * scaling, 2))
+                new NumericToken(Math.Round(boundingBox.Left * scaling, 2)),
+                new NumericToken(Math.Round(boundingBox.Bottom * scaling, 2)),
+                new NumericToken(Math.Round(boundingBox.Right * scaling, 2)),
+                new NumericToken(Math.Round(boundingBox.Top * scaling, 2))
             });
         }
     }

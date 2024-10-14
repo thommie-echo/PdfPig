@@ -2,7 +2,7 @@
 {
     using System;
     using System.Collections.Generic;
-    using System.Linq;
+    using System.Diagnostics.CodeAnalysis;
     using Core;
     using Filters;
     using Graphics.Colors;
@@ -16,7 +16,7 @@
     /// </summary>
     public class InlineImage : IPdfImage
     {
-        private readonly Lazy<IReadOnlyList<byte>> bytesFactory;
+        private readonly Lazy<ReadOnlyMemory<byte>>? memoryFactory;
 
         /// <inheritdoc />
         public PdfRectangle Bounds { get; }
@@ -28,19 +28,19 @@
         public int HeightInSamples { get; }
 
         /// <inheritdoc />
-        public ColorSpace? ColorSpace { get; }
-
-        /// <inheritdoc />
         public int BitsPerComponent { get; }
 
         /// <inheritdoc />
         public bool IsImageMask { get; }
 
         /// <inheritdoc />
-        public IReadOnlyList<decimal> Decode { get; }
+        public IReadOnlyList<double> Decode { get; }
 
         /// <inheritdoc />
         public bool IsInlineImage { get; } = true;
+
+        /// <inheritdoc />
+        public DictionaryToken ImageDictionary { get; }
 
         /// <inheritdoc />
         public RenderingIntent RenderingIntent { get; }
@@ -49,7 +49,10 @@
         public bool Interpolate { get; }
 
         /// <inheritdoc />
-        public IReadOnlyList<byte> RawBytes { get; }
+        public ReadOnlyMemory<byte> RawMemory { get; }
+
+        /// <inheritdoc />
+        public ReadOnlySpan<byte> RawBytes => RawMemory.Span;
 
         /// <inheritdoc />
         public ColorSpaceDetails ColorSpaceDetails { get; }
@@ -60,9 +63,8 @@
         internal InlineImage(PdfRectangle bounds, int widthInSamples, int heightInSamples, int bitsPerComponent, bool isImageMask,
             RenderingIntent renderingIntent,
             bool interpolate,
-            ColorSpace? colorSpace,
-            IReadOnlyList<decimal> decode,
-            IReadOnlyList<byte> bytes,
+            IReadOnlyList<double> decode,
+            ReadOnlyMemory<byte> rawMemory,
             IReadOnlyList<IFilter> filters,
             DictionaryToken streamDictionary,
             ColorSpaceDetails colorSpaceDetails)
@@ -70,14 +72,13 @@
             Bounds = bounds;
             WidthInSamples = widthInSamples;
             HeightInSamples = heightInSamples;
-            ColorSpace = colorSpace;
             Decode = decode;
             BitsPerComponent = bitsPerComponent;
             IsImageMask = isImageMask;
             RenderingIntent = renderingIntent;
             Interpolate = interpolate;
-
-            RawBytes = bytes;
+            ImageDictionary = streamDictionary;
+            RawMemory = rawMemory;
             ColorSpaceDetails = colorSpaceDetails;
 
             var supportsFilters = true;
@@ -90,13 +91,13 @@
                 }
             }
 
-            bytesFactory = supportsFilters ? new Lazy<IReadOnlyList<byte>>(() =>
+            memoryFactory = supportsFilters ? new Lazy<ReadOnlyMemory<byte>>(() =>
             {
-                var b = bytes.ToArray();
+                var b = RawMemory;
                 for (var i = 0; i < filters.Count; i++)
                 {
                     var filter = filters[i];
-                    b = filter.Decode(b, streamDictionary, i);
+                    b = filter.Decode(b.Span, streamDictionary, i);
                 }
 
                 return b;
@@ -104,21 +105,21 @@
         }
 
         /// <inheritdoc />
-        public bool TryGetBytes(out IReadOnlyList<byte> bytes)
+        public bool TryGetBytesAsMemory(out ReadOnlyMemory<byte> bytes)
         {
             bytes = null;
-            if (bytesFactory == null)
+            if (memoryFactory is null)
             {
                 return false;
             }
 
-            bytes = bytesFactory.Value;
+            bytes = memoryFactory.Value;
 
             return true;
         }
 
         /// <inheritdoc />
-        public bool TryGetPng(out byte[] bytes) => PngFromPdfImageFactory.TryGenerate(this, out bytes);
+        public bool TryGetPng([NotNullWhen(true)] out byte[]? bytes) => PngFromPdfImageFactory.TryGenerate(this, out bytes);
 
         /// <inheritdoc />
         public override string ToString()

@@ -1,15 +1,21 @@
 ﻿namespace UglyToad.PdfPig.Images.Png
 {
     using System;
+    using System.Buffers.Binary;
     using System.IO;
     using System.IO.Compression;
     using System.Text;
 
     internal static class PngOpener
     {
-        public static Png Open(Stream stream, IChunkVisitor chunkVisitor = null)
+        public static Png Open(Stream stream, IChunkVisitor? chunkVisitor = null) => Open(stream, new PngOpenerSettings
         {
-            if (stream == null)
+            ChunkVisitor = chunkVisitor
+        });
+
+        public static Png Open(Stream stream, PngOpenerSettings settings)
+        {
+            if (stream is null)
             {
                 throw new ArgumentNullException(nameof(stream));
             }
@@ -31,7 +37,7 @@
 
             var hasEncounteredImageEnd = false;
 
-            Palette palette = null;
+            Palette? palette = null;
 
             using (var output = new MemoryStream())
             {
@@ -41,7 +47,12 @@
                     {
                         if (hasEncounteredImageEnd)
                         {
-                            throw new InvalidOperationException($"Found another chunk {header} after already reading the IEND chunk.");
+                            if (settings?.DisallowTrailingData == true)
+                            {
+                                throw new InvalidOperationException($"Found another chunk {header} after already reading the IEND chunk.");
+                            }
+
+                            break;
                         }
 
                         var bytes = new byte[header.Length];
@@ -61,7 +72,11 @@
                                         throw new InvalidOperationException($"Palette data must be multiple of 3, got {header.Length}.");
                                     }
 
-                                    palette = new Palette(bytes);
+                                    // Ignore palette data unless the header.ColorType indicates that the image is paletted.
+                                    if (imageHeader.ColorType.HasFlag(ColorType.PaletteUsed))
+                                    {
+                                        palette = new Palette(bytes);
+                                    }
 
                                     break;
                                 case "IDAT":
@@ -72,6 +87,19 @@
                                     break;
                                 default:
                                     throw new NotSupportedException($"Encountered critical header {header} which was not recognised.");
+                            }
+                        }
+                        else
+                        {
+                            switch (header.Name)
+                            {
+                                case "tRNS":
+                                    // Add transparency to palette, if the PLTE chunk has been read.
+                                    if (palette != null)
+                                    {
+                                        palette.SetAlphaValues(bytes);
+                                    }
+                                    break;
                             }
                         }
 
@@ -89,7 +117,7 @@
                             throw new InvalidOperationException($"CRC calculated {result} did not match file {crcActual} for chunk: {header.Name}.");
                         }
 
-                        chunkVisitor?.Visit(stream, imageHeader, header, bytes, crc);
+                        settings?.ChunkVisitor?.Visit(stream, imageHeader, header, bytes, crc);
                     }
 
                     memoryStream.Flush();
@@ -108,7 +136,7 @@
 
                 bytesOut = Decoder.Decode(bytesOut, imageHeader, bytesPerPixel, samplesPerPixel);
 
-                return new Png(imageHeader, new RawPngData(bytesOut, bytesPerPixel, imageHeader.Width, imageHeader.InterlaceMethod, palette, imageHeader.ColorType));
+                return new Png(imageHeader, new RawPngData(bytesOut, bytesPerPixel, palette, imageHeader), palette?.HasAlphaValues ?? false);
             }
         }
 
@@ -128,7 +156,7 @@
                 return false;
             }
 
-            var length = StreamHelper.ReadBigEndianInt32(headerBytes, 0);
+            var length = BinaryPrimitives.ReadInt32BigEndian(headerBytes.AsSpan(0, 4));
 
             var name = Encoding.ASCII.GetString(headerBytes, 4, 4);
 
@@ -168,8 +196,8 @@
                 throw new InvalidOperationException($"Did not read 4 bytes for the CRC, only found: {read}.");
             }
 
-            var width = StreamHelper.ReadBigEndianInt32(ihdrBytes, 0);
-            var height = StreamHelper.ReadBigEndianInt32(ihdrBytes, 4);
+            var width = BinaryPrimitives.ReadInt32BigEndian(ihdrBytes.AsSpan(0, 4));
+            var height = BinaryPrimitives.ReadInt32BigEndian(ihdrBytes.AsSpan(4, 4));
             var bitDepth = ihdrBytes[8];
             var colorType = ihdrBytes[9];
             var compressionMethod = ihdrBytes[10];

@@ -13,7 +13,7 @@ namespace UglyToad.PdfPig.Fonts.SystemFonts
     using TrueType.Parser;
 
     /// <inheritdoc />
-    public class SystemFontFinder : ISystemFontFinder
+    public sealed class SystemFontFinder : ISystemFontFinder
     {
         private static readonly IReadOnlyDictionary<string, string[]> NameSubstitutes;
         private static readonly Lazy<IReadOnlyList<SystemFontRecord>> AvailableFonts;
@@ -41,7 +41,7 @@ namespace UglyToad.PdfPig.Fonts.SystemFonts
                 {"Times-Roman", new[] {"TimesNewRomanPSMT", "TimesNewRoman", "TimesNewRomanPS", "LiberationSerif", "NimbusRomNo9L-Regu"}},
                 {"Times-Bold", new[] {"TimesNewRomanPS-BoldMT", "TimesNewRomanPS-Bold", "TimesNewRoman-Bold", "LiberationSerif-Bold", "NimbusRomNo9L-Medi"}},
                 {"Times-Italic", new[] {"TimesNewRomanPS-ItalicMT", "TimesNewRomanPS-Italic", "TimesNewRoman-Italic", "LiberationSerif-Italic", "NimbusRomNo9L-ReguItal"}},
-                {"TimesNewRomanPS-BoldItalicMT", new[] {"TimesNewRomanPS-BoldItalic", "TimesNewRoman-BoldItalic", "LiberationSerif-BoldItalic", "NimbusRomNo9L-MediItal"}},
+                {"Times-BoldItalic", new[] {"TimesNewRomanPS-BoldItalicMT", "TimesNewRomanPS-BoldItalic", "TimesNewRoman-BoldItalic", "LiberationSerif-BoldItalic", "NimbusRomNo9L-MediItal"}},
                 {"Symbol", new[] {"SymbolMT", "StandardSymL"}},
                 {"ZapfDingbats", new[] {"ZapfDingbatsITC", "Dingbats", "MS-Gothic"}}
             };
@@ -76,7 +76,7 @@ namespace UglyToad.PdfPig.Fonts.SystemFonts
             NameSubstitutes = dict;
 
             ISystemFontLister lister;
-#if NETSTANDARD2_0
+#if NETSTANDARD2_0_OR_GREATER || NET
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
                 lister = new WindowsSystemFontLister();
@@ -89,12 +89,24 @@ namespace UglyToad.PdfPig.Fonts.SystemFonts
             {
                 lister = new LinuxSystemFontLister();
             }
+#if NET
+            else if (OperatingSystem.IsAndroid())
+            {
+                lister = new AndroidSystemFontLister();
+            }
+            else if (OperatingSystem.IsBrowser())
+            {
+                lister = new BrowserSystemFontLister();
+            }
+#endif
             else
             {
                 throw new NotSupportedException($"Unsupported operating system: {RuntimeInformation.OSDescription}.");
             }
-#else 
+#elif NETFRAMEWORK
             lister = new WindowsSystemFontLister();
+#else
+#error Missing ISystemFontLister for target framework
 #endif
 
             AvailableFonts = new Lazy<IReadOnlyList<SystemFontRecord>>(() => lister.GetAllFonts().ToList());
@@ -133,7 +145,7 @@ namespace UglyToad.PdfPig.Fonts.SystemFonts
 
             if (name.Contains(","))
             {
-                result = GetTrueTypeFontNamed(name.Replace(",", "-"));
+                result = GetTrueTypeFontNamed(name.Replace(',', '-'));
 
                 if (result != null)
                 {
@@ -164,7 +176,7 @@ namespace UglyToad.PdfPig.Fonts.SystemFonts
                 return values;
             }
 
-            return EmptyArray<string>.Instance;
+            return Array.Empty<string>();
         }
 
         private TrueTypeFont GetTrueTypeFontNamed(string name)
@@ -235,7 +247,7 @@ namespace UglyToad.PdfPig.Fonts.SystemFonts
 
             var bytes = File.ReadAllBytes(fileName);
 
-            var data = new TrueTypeDataBytes(new ByteArrayInputBytes(bytes));
+            var data = new TrueTypeDataBytes(new MemoryInputBytes(bytes));
 
             if (readNameFirst)
             {

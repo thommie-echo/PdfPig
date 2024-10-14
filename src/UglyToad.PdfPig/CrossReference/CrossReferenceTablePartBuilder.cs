@@ -12,10 +12,12 @@
 
         public long Previous { get; set; }
 
-        public DictionaryToken Dictionary { get; set; }
+        public DictionaryToken? Dictionary { get; set; }
 
         public CrossReferenceType XRefType { get; set; }
-        
+
+        public long? TiedToPreviousAtOffset { get; set; }
+
         public void Add(long objectId, int generationNumber, long offset)
         {
             IndirectReference objKey = new IndirectReference(objectId, generationNumber);
@@ -28,7 +30,7 @@
 
         public CrossReferenceTablePart Build()
         {
-            return new CrossReferenceTablePart(objects, Offset, Previous, Dictionary, XRefType);
+            return new CrossReferenceTablePart(objects, Offset, Previous, Dictionary!, XRefType, TiedToPreviousAtOffset);
         }
     }
 }

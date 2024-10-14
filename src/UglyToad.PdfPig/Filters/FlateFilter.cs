@@ -1,10 +1,9 @@
 ﻿namespace UglyToad.PdfPig.Filters
 {
+    using Fonts;
     using System;
-    using System.Collections.Generic;
     using System.IO;
     using System.IO.Compression;
-    using System.Linq;
     using Tokens;
     using Util;
 
@@ -19,7 +18,7 @@
     /// See section 3.3.3 of the spec (version 1.7) for details on the FlateDecode filter.
     /// The flate decode filter may have a predictor function to further compress the stream.
     /// </remarks>
-    internal class FlateFilter : IFilter
+    internal sealed class FlateFilter : IFilter
     {
         // Defaults are from table 3.7 in the spec (version 1.7)
         private const int DefaultColors = 1;
@@ -33,13 +32,8 @@
         public bool IsSupported { get; } = true;
 
         /// <inheritdoc />
-        public byte[] Decode(IReadOnlyList<byte> input, DictionaryToken streamDictionary, int filterIndex)
+        public ReadOnlyMemory<byte> Decode(ReadOnlySpan<byte> input, DictionaryToken streamDictionary, int filterIndex)
         {
-            if (input == null)
-            {
-                throw new ArgumentNullException(nameof(input));
-            }
-
             var parameters = DecodeParameterResolver.GetFilterParameters(streamDictionary, filterIndex);
 
             var predictor = parameters.GetIntOrDefault(NameToken.Predictor, -1);
@@ -58,9 +52,7 @@
                 var bitsPerComponent = parameters.GetIntOrDefault(NameToken.BitsPerComponent, DefaultBitsPerComponent);
                 var columns = parameters.GetIntOrDefault(NameToken.Columns, DefaultColumns);
 
-                var result = PngPredictor.Decode(decompressed, predictor, colors, bitsPerComponent, columns);
-
-                return result;
+                return PngPredictor.Decode(decompressed, predictor, colors, bitsPerComponent, columns);
             }
             catch
             {
@@ -70,7 +62,7 @@
             return bytes;
         }
 
-        private byte[] Decompress(byte[] input)
+        private static byte[] Decompress(byte[] input)
         {
             using (var memoryStream = new MemoryStream(input))
             using (var output = new MemoryStream())
@@ -79,10 +71,17 @@
                 memoryStream.ReadByte();
                 memoryStream.ReadByte();
 
-                using (var deflate = new DeflateStream(memoryStream, CompressionMode.Decompress))
+                try
                 {
-                    deflate.CopyTo(output);
-                    return output.ToArray();
+                    using (var deflate = new DeflateStream(memoryStream, CompressionMode.Decompress))
+                    {
+                        deflate.CopyTo(output);
+                        return output.ToArray();
+                    }
+                }
+                catch (InvalidDataException ex)
+                {
+                    throw new CorruptCompressedDataException("Invalid Flate compressed stream encountered", ex);
                 }
             }
         }

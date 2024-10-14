@@ -1,12 +1,9 @@
 ﻿namespace UglyToad.PdfPig.Tests.Parser
 {
-    using System;
-    using System.IO;
     using System.Text.RegularExpressions;
     using Logging;
     using PdfPig.Core;
     using PdfPig.Graphics;
-    using PdfPig.Graphics.Core;
     using PdfPig.Graphics.Operations.General;
     using PdfPig.Graphics.Operations.SpecialGraphicsState;
     using PdfPig.Graphics.Operations.TextObjects;
@@ -15,7 +12,6 @@
     using PdfPig.Graphics.Operations.TextState;
     using PdfPig.Parser;
     using PdfPig.Tokens;
-    using Xunit;
 
     public class PageContentParserTests
     {
@@ -181,6 +177,30 @@ cm BT 0.0001 Tc 19 0 0 19 0 0 Tm /Tc1 1 Tf (   \(sleep 1; printf ""QUIT\\r\\n""\
             Assert.IsType<Pop>(result[8]);
 
             Assert.Equal(@"   (sleep 1; printf ""QUIT\r\n"") | ", text.Text);
+        }
+
+        [Fact]
+        public void HandlesWeirdNumber()
+        {
+            // Issue 453
+            const string s = @"/Alpha1
+gs
+0
+0
+0
+rg
+0.00-90
+151555.0
+m
+302399.97
+151555.0
+l";
+
+            var input = StringBytesTestConverter.Convert(s, false);
+
+            var result = parser.Parse(1, input.Bytes, log);
+
+            Assert.Equal(4, result.Count);
         }
 
         private static string LineEndingsToWhiteSpace(string str)

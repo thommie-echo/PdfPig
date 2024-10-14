@@ -1,5 +1,6 @@
 ﻿namespace UglyToad.PdfPig.Writer
 {
+    using System;
     using System.Collections.Generic;
     using System.IO;
     using Tokens;
@@ -8,7 +9,12 @@
     {
         private readonly Dictionary<byte[], IndirectReferenceToken> hashes = new Dictionary<byte[], IndirectReferenceToken>(new FNVByteComparison());
 
-        public PdfDedupStreamWriter(Stream stream, bool dispose) : base(stream, dispose)
+        public PdfDedupStreamWriter(
+            Stream stream,
+            bool dispose,
+            ITokenWriter? tokenWriter = null,
+            Action<double>? recordVersion = null
+            ) : base(stream, dispose, tokenWriter, recordVersion)
         {
         }
 
@@ -23,13 +29,16 @@
             ms.SetLength(0);
             TokenWriter.WriteToken(token, ms);
             var contents = ms.ToArray();
-            if (hashes.TryGetValue(contents, out var value))
+            if (AttemptDeduplication && hashes.TryGetValue(contents, out var value))
             {
                 return value;
             }
 
             var ir = ReserveObjectNumber();
-            hashes.Add(contents, ir);
+            if (AttemptDeduplication)
+            {
+                hashes.Add(contents, ir);
+            }
 
             offsets.Add(ir.Data, Stream.Position);
             TokenWriter.WriteObject(ir.Data.ObjectNumber, ir.Data.Generation, contents, Stream);
@@ -64,20 +73,7 @@
         {
             public bool Equals(byte[] x, byte[] y)
             {
-                if (x.Length != y.Length)
-                {
-                    return false;
-                }
-
-                for (var i = 0; i < x.Length; i++)
-                {
-                    if (x[i] != y[i])
-                    {
-                        return false;
-                    }
-                }
-
-                return true;
+                return x.AsSpan().SequenceEqual(y.AsSpan());
             }
 
             public int GetHashCode(byte[] obj)

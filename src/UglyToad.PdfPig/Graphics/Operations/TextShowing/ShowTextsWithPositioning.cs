@@ -15,6 +15,8 @@
     /// </summary>
     public class ShowTextsWithPositioning : IGraphicsStateOperation
     {
+        private static readonly TokenWriter TokenWriter = new TokenWriter();
+
         /// <summary>
         /// The symbol for this operation in a stream.
         /// </summary>
@@ -34,7 +36,7 @@
         /// <param name="array">The array elements.</param>
         public ShowTextsWithPositioning(IReadOnlyList<IToken> array)
         {
-            if (array == null)
+            if (array is null)
             {
                 throw new ArgumentNullException(nameof(array));
             }
@@ -60,7 +62,7 @@
         /// <inheritdoc />
         public void Write(Stream stream)
         {
-            stream.WriteText("[");
+            stream.WriteText("["u8);
             for (var i = 0; i < Array.Count; i++)
             {
                 TokenWriter.WriteToken(Array[i], stream);
@@ -70,7 +72,7 @@
                     stream.WriteWhiteSpace();
                 }
             }
-            stream.WriteText("]");
+            stream.WriteText("]"u8);
             stream.WriteWhiteSpace();
             stream.WriteText(Symbol);
             stream.WriteNewLine();

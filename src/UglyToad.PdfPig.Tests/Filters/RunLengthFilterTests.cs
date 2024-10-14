@@ -1,9 +1,7 @@
 ﻿namespace UglyToad.PdfPig.Tests.Filters
 {
-    using System.Collections.Generic;
     using PdfPig.Filters;
     using PdfPig.Tokens;
-    using Xunit;
 
     public class RunLengthFilterTests
     {
@@ -37,7 +35,7 @@
                 10, 19
             };
 
-            Assert.Equal(expectedResult, decoded);
+            Assert.Equal(expectedResult, decoded.ToArray());
         }
 
         [Fact]
@@ -63,7 +61,7 @@
                 128, 50
             };
 
-            Assert.Equal(expectedResult, decoded);
+            Assert.Equal(expectedResult, decoded.ToArray());
         }
     }
 }

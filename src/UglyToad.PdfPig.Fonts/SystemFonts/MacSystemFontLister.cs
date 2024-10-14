@@ -4,7 +4,7 @@
     using System.Collections.Generic;
     using System.IO;
 
-    internal class MacSystemFontLister : ISystemFontLister
+    internal sealed class MacSystemFontLister : ISystemFontLister
     {
         public IEnumerable<SystemFontRecord> GetAllFonts()
         {

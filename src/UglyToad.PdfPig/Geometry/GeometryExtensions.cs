@@ -1,10 +1,9 @@
 ﻿namespace UglyToad.PdfPig.Geometry
 {
-    using Core;
-    using System;
-    using System.Collections.Generic;
     using System.Linq;
     using System.Text;
+    using Core;
+    using System.Buffers;
     using UglyToad.PdfPig.Geometry.ClipperLibrary;
     using UglyToad.PdfPig.Graphics;
     using static UglyToad.PdfPig.Core.PdfSubpath;
@@ -68,22 +67,24 @@
         /// The vertices of P are assumed to be in strict cyclic sequential order, either clockwise or
         /// counter-clockwise relative to the origin P0.
         /// </param>
-        private static PdfRectangle ParametricPerpendicularProjection(IReadOnlyList<PdfPoint> polygon)
+        private static PdfRectangle ParametricPerpendicularProjection(ReadOnlySpan<PdfPoint> polygon)
         {
-            if (polygon == null || polygon.Count == 0)
+            if (polygon.Length == 0)
             {
                 throw new ArgumentException("ParametricPerpendicularProjection(): polygon cannot be null and must contain at least one point.", nameof(polygon));
             }
-            else if (polygon.Count == 1)
+
+            if (polygon.Length == 1)
             {
                 return new PdfRectangle(polygon[0], polygon[0]);
             }
-            else if (polygon.Count == 2)
+
+            if (polygon.Length == 2)
             {
                 return new PdfRectangle(polygon[0], polygon[1]);
             }
 
-            double[] MBR = new double[8];
+            Span<double> mrb = stackalloc double[8];
 
             double Amin = double.PositiveInfinity;
             int j = 1;
@@ -112,7 +113,7 @@
                 double uX;
                 double uY;
 
-                for (j = 0; j < polygon.Count; j++)
+                for (j = 0; j < polygon.Length; j++)
                 {
                     Pj = polygon[j];
                     uX = Pj.X - Pk.X;
@@ -169,21 +170,29 @@
                     if (A < Amin)
                     {
                         Amin = A;
-                        MBR = new[] { R0X, R0Y, R1X, R1Y, R2X, R2Y, R3X, R3Y };
+
+                        mrb[0] = R0X;
+                        mrb[1] = R0Y;
+                        mrb[2] = R1X;
+                        mrb[3] = R1Y;
+                        mrb[4] = R2X;
+                        mrb[5] = R2Y;
+                        mrb[6] = R3X;
+                        mrb[7] = R3Y;
                     }
                 }
 
                 k++;
                 j = k + 1;
 
-                if (j == polygon.Count) j = 0;
-                if (k == polygon.Count) break;
+                if (j == polygon.Length) j = 0;
+                if (k == polygon.Length) break;
             }
 
-            return new PdfRectangle(new PdfPoint(MBR[4], MBR[5]),
-                                    new PdfPoint(MBR[6], MBR[7]),
-                                    new PdfPoint(MBR[2], MBR[3]),
-                                    new PdfPoint(MBR[0], MBR[1]));
+            return new PdfRectangle(new PdfPoint(mrb[4], mrb[5]),
+                                    new PdfPoint(mrb[6], mrb[7]),
+                                    new PdfPoint(mrb[2], mrb[3]),
+                                    new PdfPoint(mrb[0], mrb[1]));
         }
 
         /// <summary>
@@ -193,12 +202,27 @@
         /// <param name="points">The points.</param>
         public static PdfRectangle MinimumAreaRectangle(IEnumerable<PdfPoint> points)
         {
+            if (points is null)
+            {
+                throw new ArgumentException("MinimumAreaRectangle(): points cannot be null.", nameof(points));
+            }
+
+            return MinimumAreaRectangle(points.ToArray());
+        }
+
+        /// <summary>
+        /// Algorithm to find the (oriented) minimum area rectangle (MAR) by first finding the convex hull of the points
+        /// and then finding its MAR.
+        /// </summary>
+        /// <param name="points">The points.</param>
+        public static PdfRectangle MinimumAreaRectangle(PdfPoint[] points)
+        {
             if (points?.Any() != true)
             {
                 throw new ArgumentException("MinimumAreaRectangle(): points cannot be null and must contain at least one point.", nameof(points));
             }
 
-            return ParametricPerpendicularProjection(GrahamScan(points.Distinct()).ToList());
+            return ParametricPerpendicularProjection(GrahamScan(points.Distinct()).ToArray());
         }
 
         /// <summary>
@@ -208,7 +232,7 @@
         /// <param name="points">The points.</param>
         public static PdfRectangle OrientedBoundingBox(IReadOnlyList<PdfPoint> points)
         {
-            if (points == null || points.Count < 2)
+            if (points is null || points.Count < 2)
             {
                 throw new ArgumentException("OrientedBoundingBox(): points cannot be null and must contain at least two points.", nameof(points));
             }
@@ -258,66 +282,102 @@
         /// <summary>
         /// Algorithm to find the convex hull of the set of points with time complexity O(n log n).
         /// </summary>
-        public static IEnumerable<PdfPoint> GrahamScan(IEnumerable<PdfPoint> points)
+        public static IReadOnlyCollection<PdfPoint> GrahamScan(IEnumerable<PdfPoint> points)
         {
-            if (points?.Any() != true)
+            return GrahamScan(points.ToArray());
+        }
+
+        private sealed class PdfPointXYComparer : IComparer<PdfPoint>
+        {
+            public static readonly PdfPointXYComparer Instance = new();
+
+            public int Compare(PdfPoint p1, PdfPoint p2)
             {
-                throw new ArgumentException("GrahamScan(): points cannot be null and must contain at least one point.", nameof(points));
+                int comp = p1.X.CompareTo(p2.X);
+                return comp == 0 ? p1.Y.CompareTo(p2.Y) : comp;
+            }
+        }
+
+        /// <summary>
+        /// Algorithm to find the convex hull of the set of points with time complexity O(n log n).
+        /// </summary>
+        public static IReadOnlyCollection<PdfPoint> GrahamScan(PdfPoint[] points)
+        {
+            if (points is null || points.Length == 0)
+            {
+                throw new ArgumentException("GrahamScan(): points cannot be null and must contain at least one point.",
+                    nameof(points));
             }
 
-            if (points.Count() < 3) return points;
-
-            double polarAngle(PdfPoint point1, PdfPoint point2)
+            if (points.Length < 3)
             {
+                return points;
+            }
+
+            static double polarAngle(in PdfPoint point1, in PdfPoint point2)
+            {
+                // This is used for grouping, we could use Math.Round()
                 return Math.Atan2(point2.Y - point1.Y, point2.X - point1.X) % Math.PI;
             }
 
-            Stack<PdfPoint> stack = new Stack<PdfPoint>();
-            var sortedPoints = points.OrderBy(p => p.Y).ThenBy(p => p.X).ToList();
-            var P0 = sortedPoints[0];
-            var groups = sortedPoints.Skip(1).GroupBy(p => polarAngle(P0, p)).OrderBy(g => g.Key);
+            Array.Sort(points, PdfPointXYComparer.Instance);
 
-            sortedPoints = new List<PdfPoint>();
-            foreach (var group in groups)
+            var P0 = points[0];
+            var groups = points.Skip(1).GroupBy(p => polarAngle(P0, p)).OrderBy(g => g.Key).ToArray();
+
+            var sortedPoints = ArrayPool<PdfPoint>.Shared.Rent(groups.Length);
+
+            try
             {
-                if (group.Count() == 1)
+                for (int i = 0; i < groups.Length; i++)
                 {
-                    sortedPoints.Add(group.First());
-                }
-                else
-                {
-                    // if more than one point has the same angle, 
-                    // remove all but the one that is farthest from P0
-                    sortedPoints.Add(group.OrderByDescending(p =>
+                    var group = groups[i];
+                    if (group.Count() == 1)
                     {
-                        double dx = p.X - P0.X;
-                        double dy = p.Y - P0.Y;
-                        return dx * dx + dy * dy;
-                    }).First());
+                        sortedPoints[i] = group.First();
+                    }
+                    else
+                    {
+                        // if more than one point has the same angle, 
+                        // remove all but the one that is farthest from P0
+                        sortedPoints[i] = group.OrderByDescending(p =>
+                        {
+                            double dx = p.X - P0.X;
+                            double dy = p.Y - P0.Y;
+                            return dx * dx + dy * dy;
+                        }).First();
+                    }
                 }
-            }
 
-            if (sortedPoints.Count < 2)
-            {
-                return new[] { P0, sortedPoints[0] };
-            }
-
-            stack.Push(P0);
-            stack.Push(sortedPoints[0]);
-            stack.Push(sortedPoints[1]);
-
-            for (int i = 2; i < sortedPoints.Count; i++)
-            {
-                var point = sortedPoints[i];
-                while (!ccw(stack.ElementAt(1), stack.Peek(), point))
+                if (groups.Length < 2)
                 {
-                    stack.Pop();
+                    return [P0, sortedPoints[0]];
                 }
-                stack.Push(point);
-            }
 
-            return stack;
+                var stack = new Stack<PdfPoint>();
+                stack.Push(P0);
+                stack.Push(sortedPoints[0]);
+                stack.Push(sortedPoints[1]);
+
+                for (int i = 2; i < groups.Length; i++)
+                {
+                    var point = sortedPoints[i];
+                    while (stack.Count > 1 && !ccw(stack.ElementAt(1), stack.Peek(), point))
+                    {
+                        stack.Pop();
+                    }
+
+                    stack.Push(point);
+                }
+
+                return stack;
+            }
+            finally
+            {
+                ArrayPool<PdfPoint>.Shared.Return(sortedPoints);
+            }
         }
+
         #endregion
 
         #region PdfRectangle
@@ -329,14 +389,19 @@
         /// <param name="includeBorder">If set to false, will return false if the point belongs to the border.</param>
         public static bool Contains(this PdfRectangle rectangle, PdfPoint point, bool includeBorder = false)
         {
+            if (Math.Abs(rectangle.Area) < epsilon)
+            {
+                return false;
+            }
+
             if (Math.Abs(rectangle.Rotation) < epsilon)
             {
                 if (includeBorder)
                 {
                     return point.X >= rectangle.Left &&
-                              point.X <= rectangle.Right &&
-                              point.Y >= rectangle.Bottom &&
-                              point.Y <= rectangle.Top;
+                           point.X <= rectangle.Right &&
+                           point.Y >= rectangle.Bottom &&
+                           point.Y <= rectangle.Top;
                 }
 
                 return point.X > rectangle.Left &&
@@ -344,30 +409,29 @@
                        point.Y > rectangle.Bottom &&
                        point.Y < rectangle.Top;
             }
-            else
+
+            static double area(in PdfPoint p1, PdfPoint p2, PdfPoint p3)
             {
-                double area(PdfPoint p1, PdfPoint p2, PdfPoint p3)
-                {
-                    return Math.Abs((p2.X * p1.Y - p1.X * p2.Y) + (p3.X * p2.Y - p2.X * p3.Y) + (p1.X * p3.Y - p3.X * p1.Y)) / 2.0;
-                }
-
-                var area1 = area(rectangle.BottomLeft, point, rectangle.TopLeft);
-                var area2 = area(rectangle.TopLeft, point, rectangle.TopRight);
-                var area3 = area(rectangle.TopRight, point, rectangle.BottomRight);
-                var area4 = area(rectangle.BottomRight, point, rectangle.BottomLeft);
-
-                var sum = area1 + area2 + area3 + area4; // sum is always greater or equal to area
-
-                if (sum - rectangle.Area > epsilon) return false;
-
-                if (area1 < epsilon || area2 < epsilon || area3 < epsilon || area4 < epsilon)
-                {
-                    // point is on the rectangle
-                    return includeBorder;
-                }
-
-                return true;
+                return Math.Abs((p2.X * p1.Y - p1.X * p2.Y) + (p3.X * p2.Y - p2.X * p3.Y) +
+                                (p1.X * p3.Y - p3.X * p1.Y)) / 2.0;
             }
+
+            var area1 = area(rectangle.BottomLeft, point, rectangle.TopLeft);
+            var area2 = area(rectangle.TopLeft, point, rectangle.TopRight);
+            var area3 = area(rectangle.TopRight, point, rectangle.BottomRight);
+            var area4 = area(rectangle.BottomRight, point, rectangle.BottomLeft);
+
+            var sum = area1 + area2 + area3 + area4; // sum is always greater or equal to area
+
+            if (sum - rectangle.Area > epsilon) return false;
+
+            if (area1 < epsilon || area2 < epsilon || area3 < epsilon || area4 < epsilon)
+            {
+                // point is on the rectangle
+                return includeBorder;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -432,10 +496,10 @@
                 if (IntersectsWith(rectangle.BottomLeft, rectangle.BottomRight, other.BottomLeft, other.BottomRight)) return true;
                 if (IntersectsWith(rectangle.BottomLeft, rectangle.BottomRight, other.BottomRight, other.TopRight)) return true;
                 if (IntersectsWith(rectangle.BottomLeft, rectangle.BottomRight, other.TopRight, other.TopLeft)) return true;
-                if (IntersectsWith(rectangle.BottomLeft, rectangle.BottomRight,other.TopLeft, other.BottomLeft)) return true;
+                if (IntersectsWith(rectangle.BottomLeft, rectangle.BottomRight, other.TopLeft, other.BottomLeft)) return true;
 
                 if (IntersectsWith(rectangle.BottomRight, rectangle.TopRight, other.BottomLeft, other.BottomRight)) return true;
-                if (IntersectsWith(rectangle.BottomRight, rectangle.TopRight,other.BottomRight, other.TopRight)) return true;
+                if (IntersectsWith(rectangle.BottomRight, rectangle.TopRight, other.BottomRight, other.TopRight)) return true;
                 if (IntersectsWith(rectangle.BottomRight, rectangle.TopRight, other.TopRight, other.TopLeft)) return true;
                 if (IntersectsWith(rectangle.BottomRight, rectangle.TopRight, other.TopLeft, other.BottomLeft)) return true;
 
@@ -453,6 +517,26 @@
             }
         }
 
+        /// <summary>
+        /// Whether the one of rectangle corners is located inside the path.
+        /// </summary>
+        /// <param name="path">The path that should contain the rectangle corner.</param>
+        /// <param name="rectangle">The rectangle that should be intersected within the path.</param>
+        /// <param name="includeBorder">If set to false, will return false if the rectangle is on the path's border.</param>
+        public static bool IntersectsWith(this PdfPath path, PdfRectangle rectangle, bool includeBorder = false)
+        {
+            // NB, For later dev: Might not work for concave outer path, as it can contain all the points of the inner rectangle, but have overlapping edges.
+            var clipperPaths = path.Select(sp => sp.ToClipperPolygon().ToList()).ToList();
+            var fillType = path.FillingRule == FillingRule.NonZeroWinding ? ClipperPolyFillType.NonZero : ClipperPolyFillType.EvenOdd;
+            foreach (var point in rectangle.ToClipperPolygon())
+            {
+                if (PointInPaths(point, clipperPaths, fillType, includeBorder))
+                    return true;
+            }
+
+            return false;
+        }
+        
         /// <summary>
         /// Gets the <see cref="PdfRectangle"/> that is the intersection of two rectangles.
         /// <para>Only works for axis-aligned rectangles.</para>
@@ -472,8 +556,17 @@
         /// <param name="rectangle"></param>
         public static PdfRectangle Normalise(this PdfRectangle rectangle)
         {
-            var points = new[] { rectangle.BottomLeft, rectangle.BottomRight, rectangle.TopLeft, rectangle.TopRight };
-            return new PdfRectangle(points.Min(p => p.X), points.Min(p => p.Y), points.Max(p => p.X), points.Max(p => p.Y));
+            var bottomLeft = rectangle.BottomLeft;
+            var bottomRight = rectangle.BottomRight;
+            var topLeft = rectangle.TopLeft;
+            var topRight = rectangle.TopRight;
+
+            var minX = Math.Min(Math.Min(bottomLeft.X, bottomRight.X), Math.Min(topLeft.X, topRight.X));
+            var minY = Math.Min(Math.Min(bottomLeft.Y, bottomRight.Y), Math.Min(topLeft.Y, topRight.Y));
+            var maxX = Math.Max(Math.Max(bottomLeft.X, bottomRight.X), Math.Max(topLeft.X, topRight.X));
+            var maxY = Math.Max(Math.Max(bottomLeft.Y, bottomRight.Y), Math.Max(topLeft.Y, topRight.Y));
+
+            return new PdfRectangle(minX, minY, maxX, maxY);
         }
 
         /// <summary>
@@ -740,12 +833,12 @@
         /// The intersection of the line formed by <paramref name="pl1"/> and <paramref name="pl2"/>
         /// intersects the rectangle.
         /// </summary>
-        private static PdfPoint[] Intersect(PdfRectangle rectangle, PdfPoint pl1, PdfPoint pl2)
+        private static PdfPoint[]? Intersect(PdfRectangle rectangle, PdfPoint pl1, PdfPoint pl2)
         {
             var clipper = new Clipper();
             clipper.AddPath(rectangle.ToClipperPolygon().ToList(), ClipperPolyType.Clip, true);
 
-            clipper.AddPath(new List<ClipperIntPoint>() { pl1.ToClipperIntPoint(), pl2.ToClipperIntPoint() }, ClipperPolyType.Subject, false);
+            clipper.AddPath([pl1.ToClipperIntPoint(), pl2.ToClipperIntPoint()], ClipperPolyType.Subject, false);
 
             var solutions = new ClipperPolyTree();
             if (clipper.Execute(ClipperClipType.Intersection, solutions))
@@ -758,11 +851,11 @@
                 {
                     var solution = solutions.Children[0];
 
-                    return new[]
-                    {
+                    return
+                    [
                         new PdfPoint(solution.Contour[0].X / ClippingExtensions.Factor, solution.Contour[0].Y / ClippingExtensions.Factor),
                         new PdfPoint(solution.Contour[1].X / ClippingExtensions.Factor, solution.Contour[1].Y / ClippingExtensions.Factor)
-                    };
+                    ];
                 }
                 else
                 {
@@ -803,11 +896,11 @@
 
         #region Path Bezier Curve
         /// <summary>
-        /// Split a bezier curve into 2 bezier curves, at tau.
+        /// Split a cubic bezier-curve into 2 bezier-curves, at tau.
         /// </summary>
-        /// <param name="bezierCurve">The original bezier curve.</param>
+        /// <param name="bezierCurve">The original cubic bezier-curve.</param>
         /// <param name="tau">The t value were to split the curve, usually between 0 and 1, but not necessary.</param>
-        public static (BezierCurve, BezierCurve) Split(this BezierCurve bezierCurve, double tau)
+        public static (CubicBezierCurve, CubicBezierCurve) Split(this CubicBezierCurve bezierCurve, double tau)
         {
             // De Casteljau Algorithm
             PdfPoint[][] points = new PdfPoint[4][];
@@ -834,29 +927,29 @@
                 }
             }
 
-            return (new BezierCurve(points[0][0], points[1][0], points[2][0], points[3][0]),
-                    new BezierCurve(points[3][0], points[2][1], points[1][2], points[0][3]));
+            return (new CubicBezierCurve(points[0][0], points[1][0], points[2][0], points[3][0]),
+                    new CubicBezierCurve(points[3][0], points[2][1], points[1][2], points[0][3]));
         }
 
         /// <summary>
         /// Checks if the curve and the line are intersecting.
-        /// <para>Avoid using this method as it is not optimised. Use <see cref="Intersect(BezierCurve, PdfLine)"/> instead.</para>
+        /// <para>Avoid using this method as it is not optimised. Use <see cref="Intersect(CubicBezierCurve, PdfLine)"/> instead.</para>
         /// </summary>
-        public static bool IntersectsWith(this BezierCurve bezierCurve, PdfLine line)
+        public static bool IntersectsWith(this CubicBezierCurve bezierCurve, PdfLine line)
         {
             return IntersectsWith(bezierCurve, line.Point1, line.Point2);
         }
 
         /// <summary>
         /// Checks if the curve and the line are intersecting.
-        /// <para>Avoid using this method as it is not optimised. Use <see cref="Intersect(BezierCurve, Line)"/> instead.</para>
+        /// <para>Avoid using this method as it is not optimised. Use <see cref="Intersect(CubicBezierCurve, Line)"/> instead.</para>
         /// </summary>
-        public static bool IntersectsWith(this BezierCurve bezierCurve, Line line)
+        public static bool IntersectsWith(this CubicBezierCurve bezierCurve, Line line)
         {
             return IntersectsWith(bezierCurve, line.From, line.To);
         }
 
-        private static bool IntersectsWith(BezierCurve bezierCurve, PdfPoint p1, PdfPoint p2)
+        private static bool IntersectsWith(CubicBezierCurve bezierCurve, PdfPoint p1, PdfPoint p2)
         {
             return Intersect(bezierCurve, p1, p2).Length > 0;
         }
@@ -864,7 +957,7 @@
         /// <summary>
         /// Get the <see cref="PdfPoint"/>s that are the intersections of the line and the curve.
         /// </summary>
-        public static PdfPoint[] Intersect(this BezierCurve bezierCurve, PdfLine line)
+        public static PdfPoint[] Intersect(this CubicBezierCurve bezierCurve, PdfLine line)
         {
             return Intersect(bezierCurve, line.Point1, line.Point2);
         }
@@ -872,20 +965,20 @@
         /// <summary>
         /// Get the <see cref="PdfPoint"/>s that are the intersections of the line and the curve.
         /// </summary>
-        public static PdfPoint[] Intersect(this BezierCurve bezierCurve, Line line)
+        public static PdfPoint[] Intersect(this CubicBezierCurve bezierCurve, Line line)
         {
             return Intersect(bezierCurve, line.From, line.To);
         }
 
-        private static PdfPoint[] Intersect(BezierCurve bezierCurve, PdfPoint p1, PdfPoint p2)
+        private static PdfPoint[] Intersect(CubicBezierCurve bezierCurve, PdfPoint p1, PdfPoint p2)
         {
             var ts = IntersectT(bezierCurve, p1, p2);
-            if (ts == null || ts.Length == 0) return EmptyArray<PdfPoint>.Instance;
+            if (ts is null || ts.Length == 0) return [];
 
             List<PdfPoint> points = new List<PdfPoint>();
             foreach (var t in ts)
             {
-                PdfPoint point = new PdfPoint(
+                var point = new PdfPoint(
                     BezierCurve.ValueWithT(bezierCurve.StartPoint.X,
                                            bezierCurve.FirstControlPoint.X,
                                            bezierCurve.SecondControlPoint.X,
@@ -904,8 +997,8 @@
         /// <summary>
         /// Get the t values that are the intersections of the line and the curve.
         /// </summary>
-        /// <returns>List of t values where the <see cref="BezierCurve"/> and the <see cref="PdfLine"/> intersect.</returns>
-        public static double[] IntersectT(this BezierCurve bezierCurve, PdfLine line)
+        /// <returns>List of t values where the <see cref="CubicBezierCurve"/> and the <see cref="PdfLine"/> intersect.</returns>
+        public static double[]? IntersectT(this CubicBezierCurve bezierCurve, PdfLine line)
         {
             return IntersectT(bezierCurve, line.Point1, line.Point2);
         }
@@ -913,13 +1006,13 @@
         /// <summary>
         /// Get the t values that are the intersections of the line and the curve.
         /// </summary>
-        /// <returns>List of t values where the <see cref="BezierCurve"/> and the <see cref="Line"/> intersect.</returns>
-        public static double[] IntersectT(this BezierCurve bezierCurve, Line line)
+        /// <returns>List of t values where the <see cref="CubicBezierCurve"/> and the <see cref="Line"/> intersect.</returns>
+        public static double[]? IntersectT(this CubicBezierCurve bezierCurve, Line line)
         {
             return IntersectT(bezierCurve, line.From, line.To);
         }
 
-        private static double[] IntersectT(BezierCurve bezierCurve, PdfPoint p1, PdfPoint p2)
+        private static double[]? IntersectT(CubicBezierCurve bezierCurve, PdfPoint p1, PdfPoint p2)
         {
             // if the bounding boxes do not intersect, they cannot intersect
             var bezierBbox = bezierCurve.GetBoundingRectangle();
@@ -1246,9 +1339,9 @@
                     double OneOverTwiceB = 1 / (2.0 * b);
                     double x = (-c + sqrtDetQ) * OneOverTwiceB;
                     double x0 = (-c - sqrtDetQ) * OneOverTwiceB;
-                    return new double[] { x, x0 };
+                    return [x, x0];
                 }
-                return EmptyArray<double>.Instance; // no real roots
+                return []; // no real roots
             }
 
             double aSquared = a * a;
@@ -1297,7 +1390,7 @@
                 x3 = vietTrigonometricSolution(p, q, 2) - bOver3a;
             }
 
-            return new[] {x1, x2, x3};
+            return [x1, x2, x3];
         }
 
         internal static string ToSvg(this PdfSubpath p, double height)

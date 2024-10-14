@@ -1,10 +1,7 @@
 ﻿namespace UglyToad.PdfPig.Tests.Filters
 {
-    using System.Collections.Generic;
-    using System.IO;
     using PdfPig.Filters;
     using PdfPig.Tokens;
-    using Xunit;
 
     public class FlateFilterTests
     {
@@ -21,7 +18,7 @@
                 inputStream.Seek(0, SeekOrigin.Begin);
                 var result = filter.Encode(inputStream, parameters, 0);
                 var decoded = filter.Decode(result, parameters, 0);
-                Assert.Equal(input, decoded);
+                Assert.Equal(input, decoded.ToArray());
             }
         }
     }

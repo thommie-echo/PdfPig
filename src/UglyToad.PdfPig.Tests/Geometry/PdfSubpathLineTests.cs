@@ -1,15 +1,13 @@
 ﻿namespace UglyToad.PdfPig.Tests.Geometry
 {
-    using System.Collections.Generic;
     using UglyToad.PdfPig.Core;
     using UglyToad.PdfPig.Geometry;
-    using Xunit;
     using static UglyToad.PdfPig.Core.PdfSubpath;
 
     public class PdfSubpathLineTests
     {
-        private static readonly DoubleComparer DoubleComparer = new DoubleComparer(3);
-        private static readonly DoubleComparer PreciseDoubleComparer = new DoubleComparer(6);
+        private static readonly DoubleComparer DoubleComparer = new DoubleComparer(0.001);
+        private static readonly DoubleComparer PreciseDoubleComparer = new DoubleComparer(0.000001);
         private static readonly PointComparer PointComparer = new PointComparer(DoubleComparer);
 
         private static Line CreateLine(double x1, double y1, double x2, double y2)

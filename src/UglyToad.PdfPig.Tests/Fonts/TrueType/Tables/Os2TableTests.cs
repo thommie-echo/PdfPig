@@ -1,11 +1,8 @@
 ﻿namespace UglyToad.PdfPig.Tests.Fonts.TrueType.Tables
 {
-    using System.IO;
-    using System.Linq;
     using PdfPig.Core;
     using PdfPig.Fonts.TrueType;
     using PdfPig.Fonts.TrueType.Parser;
-    using Xunit;
 
     public class Os2TableTests
     {
@@ -17,7 +14,7 @@
         {
             var fontBytes = TrueTypeTestHelper.GetFileBytes(fontFile);
 
-            var parsed = TrueTypeFontParser.Parse(new TrueTypeDataBytes(new ByteArrayInputBytes(fontBytes)));
+            var parsed = TrueTypeFontParser.Parse(new TrueTypeDataBytes(new MemoryInputBytes(fontBytes)));
 
             var os2 = parsed.TableRegister.Os2Table;
             var os2Header = parsed.TableHeaders.Single(x => x.Value.Tag == TrueTypeHeaderTable.Os2);

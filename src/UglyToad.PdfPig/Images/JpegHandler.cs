@@ -10,7 +10,7 @@
 
         public static JpegInformation GetInformation(Stream stream)
         {
-            if (stream == null)
+            if (stream is null)
             {
                 throw new ArgumentNullException(nameof(stream));
             }
@@ -28,18 +28,52 @@
             {
                 switch (marker)
                 {
-                    case JpegMarker.StartOfBaselineDctFrame:
-                    {
-                        // ReSharper disable once UnusedVariable
-                        var length = ReadShort(stream, shortBuffer);
-                        var bpp = stream.ReadByte();
-                        var height = ReadShort(stream, shortBuffer);
-                        var width = ReadShort(stream, shortBuffer);
+                    case JpegMarker.StartOfImage:
+                    case JpegMarker.Restart0:
+                    case JpegMarker.Restart1:
+                    case JpegMarker.Restart2:
+                    case JpegMarker.Restart3:
+                    case JpegMarker.Restart4:
+                    case JpegMarker.Restart5:
+                    case JpegMarker.Restart6:
+                    case JpegMarker.Restart7:
 
-                        return new JpegInformation(width, height, bpp);
-                    }
-                    case JpegMarker.StartOfProgressiveDctFrame:
+                        // No length markers
                         break;
+                    case JpegMarker.StartOfBaselineDctFrame:
+                    case JpegMarker.StartOfProgressiveDctFrame:
+                        {
+                            // ReSharper disable once UnusedVariable
+                            var length = ReadShort(stream, shortBuffer);
+                            var bpp = stream.ReadByte();
+                            var height = ReadShort(stream, shortBuffer);
+                            var width = ReadShort(stream, shortBuffer);
+                            var numberOfComponents = stream.ReadByte();
+
+                            return new JpegInformation(width, height, bpp, numberOfComponents);
+                        }
+                    case JpegMarker.ApplicationSpecific0:
+                    case JpegMarker.ApplicationSpecific1:
+                    case JpegMarker.ApplicationSpecific2:
+                    case JpegMarker.ApplicationSpecific3:
+                    case JpegMarker.ApplicationSpecific4:
+                    case JpegMarker.ApplicationSpecific5:
+                    case JpegMarker.ApplicationSpecific6:
+                    case JpegMarker.ApplicationSpecific7:
+                    case JpegMarker.ApplicationSpecific8:
+                    case JpegMarker.ApplicationSpecific9:
+                    case JpegMarker.ApplicationSpecific10:
+                    case JpegMarker.ApplicationSpecific11:
+                    case JpegMarker.ApplicationSpecific12:
+                    case JpegMarker.ApplicationSpecific13:
+                    case JpegMarker.ApplicationSpecific14:
+                    case JpegMarker.ApplicationSpecific15:
+                    default:
+                        {
+                            var length = ReadShort(stream, shortBuffer);
+                            stream.Seek(length - 2, SeekOrigin.Current);
+                            break;
+                        }
                 }
 
                 marker = (JpegMarker)ReadSegmentMarker(stream, true);
@@ -95,7 +129,7 @@
             throw new InvalidOperationException();
         }
 
-        private static short ReadShort(Stream stream, byte[] buffer)
+        private static ushort ReadShort(Stream stream, byte[] buffer)
         {
             var read = stream.Read(buffer, 0, 2);
 
@@ -104,7 +138,7 @@
                 throw new InvalidOperationException("Failed to read a short where expected in the JPEG stream.");
             }
 
-            return (short) ((buffer[0] << 8) + buffer[1]);
+            return (ushort)((buffer[0] << 8) + buffer[1]);
         }
     }
 }

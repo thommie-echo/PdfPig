@@ -1,4 +1,6 @@
-﻿namespace UglyToad.PdfPig.IO
+﻿#nullable disable
+
+namespace UglyToad.PdfPig.IO
 {
     using System;
     using System.Collections.Generic;
@@ -424,7 +426,7 @@
          */
         private void CheckClosed()
         {
-            if (currentBuffer == null)
+            if (currentBuffer is null)
             {
                 // consider that the rab is closed if there is no current buffer
                 throw new ObjectDisposedException("RandomAccessBuffer already closed");
@@ -438,7 +440,7 @@
 
         public bool IsClosed()
         {
-            return currentBuffer == null;
+            return currentBuffer is null;
         }
 
 /**

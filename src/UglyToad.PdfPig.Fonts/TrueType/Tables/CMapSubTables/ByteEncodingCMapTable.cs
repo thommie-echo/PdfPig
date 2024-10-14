@@ -34,6 +34,11 @@
             var length = data.ReadUnsignedShort();
             var language = data.ReadUnsignedShort();
 
+            if (length == 0)
+            {
+                return new ByteEncodingCMapTable(platformId, encodingId, language, []);
+            }
+
             var glyphMapping = data.ReadByteArray(length - (SizeOfShort * 3));
 
             return new ByteEncodingCMapTable(platformId, encodingId, language, glyphMapping);
@@ -41,7 +46,7 @@
 
         public int CharacterCodeToGlyphIndex(int characterCode)
         {
-            if (characterCode < 0 || characterCode >= GlyphMappingLength)
+            if (characterCode < 0 || characterCode >= glyphMapping.Length)
             {
                 return 0;
             }

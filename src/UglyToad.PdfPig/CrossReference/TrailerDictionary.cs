@@ -3,10 +3,8 @@
     using System;
     using System.Collections.Generic;
     using Core;
-    using Exceptions;
     using Tokens;
     using Util;
-    using Util.JetBrains.Annotations;
 
     /// <summary>
     /// Contains information for interpreting the cross-reference table.
@@ -37,7 +35,7 @@
         /// <summary>
         /// The object reference for the document's information dictionary if it contains one.
         /// </summary>
-        public IndirectReference? Info { get; }
+        public IToken? Info { get; }
 
         /// <summary>
         /// A list containing two-byte string tokens which act as file identifiers.
@@ -47,16 +45,16 @@
         /// <summary>
         /// The document's encryption dictionary.
         /// </summary>
-        [CanBeNull]
-        public IToken EncryptionToken { get; }
+        public IToken? EncryptionToken { get; }
 
         /// <summary>
         /// Create a new <see cref="TrailerDictionary"/>.
         /// </summary>
         /// <param name="dictionary">The parsed dictionary from the document.</param>
-        internal TrailerDictionary(DictionaryToken dictionary)
+        /// <param name="isLenientParsing">Indicates if the parsing is in lenient mode</param>
+        internal TrailerDictionary(DictionaryToken dictionary, bool isLenientParsing)
         {
-            if (dictionary == null)
+            if (dictionary is null)
             {
                 throw new ArgumentNullException(nameof(dictionary));
             }
@@ -71,9 +69,13 @@
 
             Root = rootReference.Data;
 
-            if (dictionary.TryGet(NameToken.Info, out IndirectReferenceToken reference))
+            if (dictionary.TryGet(NameToken.Info, out var infoToken))
             {
-                Info = reference.Data;
+                if (!isLenientParsing && infoToken is not IndirectReferenceToken)
+                {
+                    throw new PdfDocumentFormatException($"The info token in the trailer dictionary should only contain indirect references, instead got: {infoToken}.");
+                }
+                Info = infoToken;
             }
 
             if (dictionary.TryGet(NameToken.Id, out ArrayToken arr))
@@ -96,7 +98,7 @@
             }
             else
             {
-                Identifier = EmptyArray<IDataToken<string>>.Instance;
+                Identifier = Array.Empty<IDataToken<string>>();
             }
 
             if (dictionary.TryGet(NameToken.Encrypt, out var encryptionToken))

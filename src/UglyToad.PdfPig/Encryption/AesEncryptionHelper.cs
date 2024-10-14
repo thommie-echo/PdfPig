@@ -13,17 +13,30 @@
 
         public static byte[] Decrypt(byte[] data, byte[] finalKey)
         {
+            if (data.Length == 0)
+            {
+                return data;
+            }
+
             var iv = new byte[16];
             Array.Copy(data, iv, iv.Length);
-            
-            using (var rijndael = Rijndael.Create())
-            {
-                rijndael.Key = finalKey;
-                rijndael.IV = iv;
 
+            using (var aes = Aes.Create())
+            {
+                aes.Key = finalKey;
+                aes.IV = iv;
+
+#if NET8_0_OR_GREATER
+                var encryptedData = data.AsSpan(iv.Length);
+                if (encryptedData.IsEmpty)
+                {
+                    return [];
+                }
+                return aes.DecryptCbc(encryptedData, iv, PaddingMode.PKCS7);
+#else
                 var buffer = new byte[256];
 
-                using (var decryptor = rijndael.CreateDecryptor(rijndael.Key, rijndael.IV))
+                using (var decryptor = aes.CreateDecryptor(aes.Key, aes.IV))
                 using (var input = new MemoryStream(data))
                 using (var output = new MemoryStream())
                 {
@@ -31,19 +44,20 @@
                     using (var cryptoStream = new CryptoStream(input, decryptor, CryptoStreamMode.Read))
                     {
                         int read;
-                        while ((read = cryptoStream.Read(buffer, 0, buffer.Length)) != -1)
+                        do
                         {
-                            output.Write(buffer, 0, read);
+                            read = cryptoStream.Read(buffer, 0, buffer.Length);
 
-                            if (read < buffer.Length)
+                            if (read > 0)
                             {
-                                break;
+                                output.Write(buffer, 0, read);
                             }
-                        }
+                        } while (read > 0);
 
                         return output.ToArray();
                     }
                 }
+#endif
             }
         }
     }

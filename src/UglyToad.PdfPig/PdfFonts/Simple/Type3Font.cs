@@ -1,5 +1,7 @@
 ﻿namespace UglyToad.PdfPig.PdfFonts.Simple
-{
+{    
+    using System.Collections.Generic;
+    using System.Diagnostics.CodeAnalysis;
     using Cmap;
     using Composite;
     using Core;
@@ -48,20 +50,31 @@
             return bytes.CurrentByte;
         }
 
-        public bool TryGetUnicode(int characterCode, out string value)
+        public bool TryGetUnicode(int characterCode, [NotNullWhen(true)] out string? value)
         {
-            if (toUnicodeCMap.CanMapToUnicode)
+            value = null;
+
+            if (toUnicodeCMap.CanMapToUnicode && toUnicodeCMap.TryGet(characterCode, out value))
             {
-                return toUnicodeCMap.TryGet(characterCode, out value);
+                return true;
             }
 
-            var name = encoding.GetName(characterCode);
+            if (encoding is null)
+            {
+                return false;
+            }
 
-            var listed = GlyphList.AdobeGlyphList.NameToUnicode(name);
+            try
+            {
+                var name = encoding.GetName(characterCode);
+                value = GlyphList.AdobeGlyphList.NameToUnicode(name);
+            }
+            catch
+            {
+                return false;
+            }
 
-            value = listed;
-
-            return true;
+            return value is not null;
         }
 
         public CharacterBoundingBox GetBoundingBox(int characterCode)
@@ -82,12 +95,31 @@
                 throw new InvalidFontFormatException($"The character code was not contained in the widths array: {characterCode}.");
             }
 
-            return new PdfRectangle(0, 0, widths[characterCode - firstChar], 0);
+            return new PdfRectangle(0, 0, widths[characterCode - firstChar], boundingBox.Height);
         }
 
         public TransformationMatrix GetFontMatrix()
         {
             return fontMatrix;
+        }
+
+        /// <summary>
+        /// <inheritdoc/>
+        /// <para>Type 3 fonts do not use vector paths. Always returns <c>false</c>.</para>
+        /// </summary>
+        public bool TryGetPath(int characterCode, [NotNullWhen(true)] out IReadOnlyList<PdfSubpath>? path)
+        {
+            path = null;
+            return false;
+        }
+
+        /// <summary>
+        /// <inheritdoc/>
+        /// <para>Type 3 fonts do not use vector paths. Always returns <c>false</c>.</para>
+        /// </summary>
+        public bool TryGetNormalisedPath(int characterCode, [NotNullWhen(true)] out IReadOnlyList<PdfSubpath>? path)
+        {
+            return TryGetPath(characterCode, out path);
         }
     }
 }

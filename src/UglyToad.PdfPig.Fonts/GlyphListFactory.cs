@@ -4,6 +4,7 @@
     using System.Collections.Generic;
     using System.Globalization;
     using System.IO;
+    using Util;
 
     internal class GlyphListFactory
     {
@@ -18,19 +19,33 @@
                     throw new ArgumentException($"No embedded glyph list resource was found with the name {listName}.");
                 }
 
+                int? capacity = null;
+                // Prevent too much wasted memory capacity for Adobe GlyphList
+                if (string.Equals("glyphlist", listName, StringComparison.OrdinalIgnoreCase))
+                {
+                    capacity = 4300;
+                }
 
-                return Read(resource);
+                return ReadInternal(resource, capacity);
             }
         }
 
         public static GlyphList Read(Stream stream)
+        {
+            return ReadInternal(stream);
+        }
+
+        private static readonly char[] Semicolon = [';'];
+
+        private static GlyphList ReadInternal(Stream stream, int? defaultDictionaryCapacity = 0)
         {
             if (stream == null)
             {
                 throw new ArgumentNullException(nameof(stream));
             }
 
-            var result = new Dictionary<string, string>();
+            var result = defaultDictionaryCapacity.HasValue ? new Dictionary<string, string>(defaultDictionaryCapacity.Value) : [];
+
 
             using (var reader = new StreamReader(stream))
             {
@@ -48,7 +63,7 @@
                         continue;
                     }
 
-                    var parts = line.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+                    var parts = line.Split(Semicolon, StringSplitOptions.RemoveEmptyEntries);
 
                     if (parts.Length != 2)
                     {
@@ -58,13 +73,16 @@
 
                     var key = parts[0];
 
-                    var values = parts[1].Split(' ');
-
+                    var valueReader = new StringSplitter(parts[1].AsSpan(), ' ');
                     var value = string.Empty;
-                    foreach (var s in values)
-                    {
-                        var code = int.Parse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
 
+                    while (valueReader.TryRead(out var s))
+                    {
+#if NET6_0_OR_GREATER
+                        var code = int.Parse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+#else
+                        var code = int.Parse(s.ToString(), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+#endif
                         value += char.ConvertFromUtf32(code);
                     }
 

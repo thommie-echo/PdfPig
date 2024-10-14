@@ -26,27 +26,16 @@
         /// </summary>
         private const int EndOfFileSearchRange = 2048;
 
-        private static readonly byte[] StartXRefBytes =
-        {
-            (byte) 's',
-            (byte) 't',
-            (byte) 'a',
-            (byte) 'r',
-            (byte) 't',
-            (byte) 'x',
-            (byte) 'r',
-            (byte) 'e',
-            (byte) 'f'
-        };
+        private static ReadOnlySpan<byte> StartXRefBytes => "startxref"u8;
 
         public static long GetFirstCrossReferenceOffset(IInputBytes bytes, ISeekableTokenScanner scanner, bool isLenientParsing)
         {
-            if (bytes == null)
+            if (bytes is null)
             {
                 throw new ArgumentNullException(nameof(bytes));
             }
 
-            if (scanner == null)
+            if (scanner is null)
             {
                 throw new ArgumentNullException(nameof(scanner));
             }
@@ -64,7 +53,7 @@
                 throw new InvalidOperationException($"The start xref position we found was not correct. Found {startXrefPosition} but it was occupied by token {scanner.CurrentToken}.");
             }
 
-            NumericToken numeric = null;
+            NumericToken? numeric = null;
             while (scanner.MoveNext())
             {
                 if (scanner.CurrentToken is NumericToken token)
@@ -79,7 +68,7 @@
                 }
             }
 
-            if (numeric == null)
+            if (numeric is null)
             {
                 throw new PdfDocumentFormatException($"Could not find the numeric value following 'startxref'. Searching from position {startXrefPosition}.");
             }

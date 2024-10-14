@@ -1,6 +1,6 @@
 ﻿namespace UglyToad.PdfPig.Parser.FileStructure
 {
-    using System.Collections.Generic;
+    using System;
     using System.Linq;
     using CrossReference;
     using Core;
@@ -13,7 +13,7 @@
     {
         private const string InUseEntry = "n";
         private const string FreeEntry = "f";
-        
+
         public static CrossReferenceTablePart Parse(ISeekableTokenScanner scanner, long offset, bool isLenientParsing)
         {
             var builder = new CrossReferenceTablePartBuilder
@@ -31,9 +31,21 @@
 
             if (scanner.CurrentToken is OperatorToken operatorToken)
             {
-                if (operatorToken.Data == "xref")
+                if (operatorToken.Data == OperatorToken.Xref.Data)
                 {
                     scanner.MoveNext();
+                }
+                else if (isLenientParsing)
+                {
+                    if (operatorToken.Data.StartsWith(OperatorToken.Xref.Data))
+                    {
+                        scanner.Seek(scanner.CurrentPosition - operatorToken.Data.Length + OperatorToken.Xref.Data.Length);
+                        scanner.MoveNext();
+                    }
+                    else
+                    {
+                        throw new PdfDocumentFormatException($"Unexpected operator in xref position: {operatorToken}.");
+                    }
                 }
                 else
                 {
@@ -55,8 +67,9 @@
                 scanner.RegisterCustomTokenizer((byte)'\r', tokenizer);
                 scanner.RegisterCustomTokenizer((byte)'\n', tokenizer);
 
+                using var tokens = new ArrayPoolBufferWriter<IToken>();
+
                 var readingLine = false;
-                var tokens = new List<IToken>();
                 var count = 0;
                 while (scanner.MoveNext())
                 {
@@ -69,9 +82,9 @@
 
                         readingLine = false;
 
-                        count = ProcessTokens(tokens, builder, isLenientParsing, count, ref definition);
+                        count = ProcessTokens(tokens.WrittenSpan, builder, isLenientParsing, count, ref definition);
                         
-                        tokens.Clear();
+                        tokens.Reset();
 
                         continue;
                     }
@@ -89,12 +102,12 @@
                     }
 
                     readingLine = true;
-                    tokens.Add(scanner.CurrentToken);
+                    tokens.Write(scanner.CurrentToken);
                 }
 
-                if (tokens.Count > 0)
+                if (tokens.WrittenCount > 0)
                 {
-                    ProcessTokens(tokens, builder, isLenientParsing, count, ref definition);
+                    ProcessTokens(tokens.WrittenSpan, builder, isLenientParsing, count, ref definition);
                 }
 
                 scanner.DeregisterCustomTokenizer(tokenizer);
@@ -105,19 +118,26 @@
             return builder.Build();
         }
 
-        private static int ProcessTokens(List<IToken> tokens, CrossReferenceTablePartBuilder builder, bool isLenientParsing,
+        public static bool IsCrossReferenceMarker(ISeekableTokenScanner scanner, bool isLenientParsing)
+        {
+            return (scanner.CurrentToken is OperatorToken operatorToken
+                    && (operatorToken.Data == OperatorToken.Xref.Data
+                        || (isLenientParsing 
+                            && operatorToken.Data.StartsWith(OperatorToken.Xref.Data)
+                            && int.TryParse(operatorToken.Data.Substring(OperatorToken.Xref.Data.Length), out _))));
+        }
+
+        private static int ProcessTokens(ReadOnlySpan<IToken> tokens, CrossReferenceTablePartBuilder builder, bool isLenientParsing,
             int objectCount, ref TableSubsectionDefinition definition)
         {
-            string GetErrorMessage()
+            static string GetErrorMessage(ReadOnlySpan<IToken> tokens)
             {
-                var representation = "Invalid line format in xref table: [" + string.Join(", ", tokens.Select(x => x.ToString())) + "]";
-
-                return representation;
+                return "Invalid line format in xref table: [" + string.Join(", ", tokens.ToArray().Select(x => x.ToString())) + "]";
             }
 
             if (objectCount == definition.Count)
             {
-                if (tokens.Count == 2)
+                if (tokens.Length == 2)
                 {
                     if (tokens[0] is NumericToken newFirstObjectToken && tokens[1] is NumericToken newObjectCountToken)
                     {
@@ -127,20 +147,24 @@
                     }
                 }
 
-                throw new PdfDocumentFormatException($"Found a line with 2 unexpected entries in the cross reference table: {tokens[0]}, {tokens[1]}.");
+                if (!isLenientParsing)
+                {
+                    throw new PdfDocumentFormatException($"Found a line with 2 unexpected entries in the cross reference table: {tokens[0]}, {tokens[1]}.");
+                }
+                
             }
             
-            if (tokens.Count <= 2)
+            if (tokens.Length <= 2)
             {
                 if (!isLenientParsing)
                 {
-                    throw new PdfDocumentFormatException(GetErrorMessage());
+                    throw new PdfDocumentFormatException(GetErrorMessage(tokens));
                 }
 
                 return objectCount;
             }
 
-            var lastToken = tokens[tokens.Count - 1];
+            var lastToken = tokens[tokens.Length - 1];
 
             if (lastToken is OperatorToken operatorToken)
             {
@@ -153,7 +177,7 @@
                 {
                     if (!isLenientParsing)
                     {
-                        throw new PdfDocumentFormatException(GetErrorMessage());
+                        throw new PdfDocumentFormatException(GetErrorMessage(tokens));
                     }
 
                     return objectCount;
@@ -170,7 +194,7 @@
             {
                 if (!isLenientParsing)
                 {
-                    throw new PdfDocumentFormatException(GetErrorMessage());
+                    throw new PdfDocumentFormatException(GetErrorMessage(tokens));
                 }
             }
 

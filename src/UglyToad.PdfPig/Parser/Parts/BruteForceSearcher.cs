@@ -5,7 +5,6 @@
     using System.Globalization;
     using System.Text;
     using Core;
-    using Util.JetBrains.Annotations;
 
     /// <summary>
     /// Brute force search for all objects in the document.
@@ -19,10 +18,9 @@
         /// </summary>
         /// <param name="bytes">The bytes of the document.</param>
         /// <returns>The object keys and offsets for the objects in this document.</returns>
-        [NotNull]
         public static IReadOnlyDictionary<IndirectReference, long> GetObjectLocations(IInputBytes bytes)
         {
-            if (bytes == null)
+            if (bytes is null)
             {
                 throw new ArgumentNullException(nameof(bytes));
             }
@@ -82,6 +80,31 @@
                         {
                             bytes.MoveNext();
                             currentOffset++;
+                        }
+                    }
+                    else if (ReadHelper.IsWhitespace(bytes.CurrentByte))
+                    {
+                        var next = bytes.Peek();
+                        if (next.HasValue && next.Value == 'o')
+                        {
+                            if (ReadHelper.IsString(bytes, " obj"))
+                            {
+                                currentlyInObject = false;
+                                currentOffset--;
+                                loopProtection = 0;
+                            }
+                            else
+                            {
+                                bytes.MoveNext();
+                                currentOffset++;
+                                loopProtection = 0;
+                            }
+                        }
+                        else
+                        {
+                            bytes.MoveNext();
+                            currentOffset++;
+                            loopProtection = 0;
                         }
                     }
                     else
@@ -158,7 +181,7 @@
 
                 currentlyInObject = true;
 
-                currentOffset++;
+                currentOffset += objBuffer.Length;
 
                 bytes.Seek(currentOffset);
                 loopProtection = 0;
@@ -176,7 +199,7 @@
 
             const string searchTerm = "%%EOF";
 
-            var minimumEndOffset = bytes.Length - searchTerm.Length;
+            var minimumEndOffset = bytes.Length - searchTerm.Length + 1; // Issue #512 - Unable to open PDF - BruteForceScan starts from earlier of two EOF marker due to min end offset off by 1
 
             bytes.Seek(minimumEndOffset);
 
@@ -198,7 +221,7 @@
             return long.MaxValue;
         }
 
-        private static bool IsStartObjMarker(byte[] data)
+        private static bool IsStartObjMarker(ReadOnlySpan<byte> data)
         {
             if (!ReadHelper.IsWhitespace(data[0]))
             {

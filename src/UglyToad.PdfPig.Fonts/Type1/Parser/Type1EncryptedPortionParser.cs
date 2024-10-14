@@ -14,7 +14,7 @@
         private const int Password = 5839;
         private const int CharstringEncryptionKey = 4330;
 
-        public (Type1PrivateDictionary, Type1CharStrings) Parse(IReadOnlyList<byte> bytes, bool isLenientParsing)
+        public (Type1PrivateDictionary, Type1CharStrings) Parse(ReadOnlySpan<byte> bytes, bool isLenientParsing)
         {
             if (!IsBinary(bytes))
             {
@@ -23,7 +23,7 @@
 
             var decrypted = Decrypt(bytes, EexecEncryptionKey, EexecRandomBytes);
 
-            if (decrypted.Count == 0)
+            if (decrypted.Length == 0)
             {
                 var defaultPrivateDictionary = new Type1PrivateDictionary(new Type1PrivateDictionary.Builder());
                 var defaultCharstrings = new Type1CharStrings(new Dictionary<string, Type1CharStrings.CommandSequence>(),
@@ -31,8 +31,8 @@
                     new Dictionary<int, Type1CharStrings.CommandSequence>());
                 return (defaultPrivateDictionary, defaultCharstrings);
             }
-            
-            var tokenizer = new Type1Tokenizer(new ByteArrayInputBytes(decrypted));
+
+            var tokenizer = new Type1Tokenizer(new MemoryInputBytes(new ReadOnlyMemory<byte>([.. decrypted])));
 
             /*
              * After 4 random characters follows the /Private dictionary and the /CharString dictionary.
@@ -58,7 +58,7 @@
 
             var length = next.AsInt();
             ReadExpected(tokenizer, Type1Token.TokenType.Name, "dict");
-            
+
             // Could also be "/Private 10 dict def Private begin" instead of the "dup"
             ReadExpectedAfterOptional(tokenizer, Type1Token.TokenType.Name, "def", Type1Token.TokenType.Name, "dup");
             ReadExpected(tokenizer, Type1Token.TokenType.Name, "begin");
@@ -74,7 +74,7 @@
             for (var i = 0; i < length; i++)
             {
                 var token = tokenizer.GetNext();
-                
+
                 // premature end
                 if (token == null || token.Type != Type1Token.TokenType.Literal)
                 {
@@ -88,7 +88,7 @@
                     case Type1Symbols.RdProcedure:
                     case Type1Symbols.RdProcedureAlt:
                         {
-                            var procedureTokens = ReadProcedure(tokenizer);
+                            var procedureTokens = ReadProcedure(tokenizer, false);
                             builder.Rd = procedureTokens;
                             ReadTillDef(tokenizer);
                             break;
@@ -96,7 +96,7 @@
                     case Type1Symbols.NoAccessDef:
                     case Type1Symbols.NoAccessDefAlt:
                         {
-                            var procedureTokens = ReadProcedure(tokenizer);
+                            var procedureTokens = ReadProcedure(tokenizer, false);
                             builder.NoAccessDef = procedureTokens;
                             ReadTillDef(tokenizer);
                             break;
@@ -104,7 +104,7 @@
                     case Type1Symbols.NoAccessPut:
                     case Type1Symbols.NoAccessPutAlt:
                         {
-                            var procedureTokens = ReadProcedure(tokenizer);
+                            var procedureTokens = ReadProcedure(tokenizer, false);
                             builder.NoAccessPut = procedureTokens;
                             ReadTillDef(tokenizer);
                             break;
@@ -123,27 +123,27 @@
                         }
                     case Type1Symbols.StdHorizontalStemWidth:
                         {
-                            var widths = ReadArrayValues(tokenizer, x => x.AsDecimal());
+                            var widths = ReadArrayValues(tokenizer, x => x.AsDouble());
                             var width = widths[0];
                             builder.StandardHorizontalWidth = width;
                             break;
                         }
                     case Type1Symbols.StdVerticalStemWidth:
                         {
-                            var widths = ReadArrayValues(tokenizer, x => x.AsDecimal());
+                            var widths = ReadArrayValues(tokenizer, x => x.AsDouble());
                             var width = widths[0];
                             builder.StandardVerticalWidth = width;
                             break;
                         }
                     case Type1Symbols.StemSnapHorizontalWidths:
                         {
-                            var widths = ReadArrayValues(tokenizer, x => x.AsDecimal());
+                            var widths = ReadArrayValues(tokenizer, x => x.AsDouble());
                             builder.StemSnapHorizontalWidths = widths;
                             break;
                         }
                     case Type1Symbols.StemSnapVerticalWidths:
                         {
-                            var widths = ReadArrayValues(tokenizer, x => x.AsDecimal());
+                            var widths = ReadArrayValues(tokenizer, x => x.AsDouble());
                             builder.StemSnapVerticalWidths = widths;
                             break;
                         }
@@ -161,9 +161,27 @@
                         }
                     case Type1Symbols.MinFeature:
                         {
-                            var procedureTokens = ReadProcedure(tokenizer);
+                            try
+                            {
+                                var startToken = tokenizer.GetNext();
 
-                            builder.MinFeature = new MinFeature(procedureTokens[0].AsInt(), procedureTokens[1].AsInt());
+                                if (startToken.Type == Type1Token.TokenType.StartArray)
+                                {
+                                    var arrayTokens = ReadArrayValues(tokenizer, x => x.AsInt(), true);
+
+                                    builder.MinFeature = new MinFeature(arrayTokens[0], arrayTokens[1]);
+                                }
+                                else if (startToken.Type == Type1Token.TokenType.StartProc)
+                                {
+                                    var procedureTokens = ReadProcedure(tokenizer, true);
+
+                                    builder.MinFeature = new MinFeature(procedureTokens[0].AsInt(), procedureTokens[1].AsInt());
+                                }
+                            }
+                            catch
+                            {
+                                // Ignored.
+                            }
 
                             ReadTillDef(tokenizer);
 
@@ -297,9 +315,9 @@
         /// The first byte must not be whitespace.
         /// One of the first four ciphertext bytes must not be an ASCII hex character.
         /// </summary>
-        private static bool IsBinary(IReadOnlyList<byte> bytes)
+        private static bool IsBinary(ReadOnlySpan<byte> bytes)
         {
-            if (bytes.Count < 4)
+            if (bytes.Length < 4)
             {
                 return true;
             }
@@ -322,13 +340,14 @@
             return false;
         }
 
-        private static IReadOnlyList<byte> ConvertHexToBinary(IReadOnlyList<byte> bytes)
+        private static ReadOnlySpan<byte> ConvertHexToBinary(ReadOnlySpan<byte> bytes)
         {
-            var result = new List<byte>(bytes.Count / 2);
+            var result = new byte[bytes.Length / 2];
+            int index = 0;
 
             var last = '\0';
             var offset = 0;
-            for (var i = 0; i < bytes.Count; i++)
+            for (var i = 0; i < bytes.Length; i++)
             {
                 var c = (char)bytes[i];
                 if (!ReadHelper.IsHex(c))
@@ -339,7 +358,7 @@
 
                 if (offset == 1)
                 {
-                    result.Add(HexToken.Convert(last, c));
+                    result[index++] = HexToken.ConvertPair(last, c);
                     offset = 0;
                 }
                 else
@@ -353,7 +372,7 @@
             return result;
         }
 
-        private static IReadOnlyList<byte> Decrypt(IReadOnlyList<byte> bytes, int key, int randomBytes)
+        private static ReadOnlySpan<byte> Decrypt(ReadOnlySpan<byte> bytes, int key, int randomBytes)
         {
             /*
              * We start with three constants R = 55665, c1 = 52845 and c2 = 22719.
@@ -370,17 +389,17 @@
                 return bytes;
             }
 
-            if (randomBytes > bytes.Count || bytes.Count == 0)
+            if (randomBytes > bytes.Length || bytes.Length == 0)
             {
-                return new byte[0];
+                return [];
             }
 
             const int c1 = 52845;
             const int c2 = 22719;
 
-            var plainBytes = new byte[bytes.Count - randomBytes];
+            var plainBytes = new byte[bytes.Length - randomBytes];
 
-            for (var i = 0; i < bytes.Count; i++)
+            for (var i = 0; i < bytes.Length; i++)
             {
                 var cipher = bytes[i] & 0xFF;
                 var plain = cipher ^ key >> 8;
@@ -433,10 +452,10 @@
             throw new InvalidOperationException($"Found invalid token {token} when type {type} with text {text} was expected.");
         }
 
-        private static IReadOnlyList<Type1Token> ReadProcedure(Type1Tokenizer tokenizer)
+        private static IReadOnlyList<Type1Token> ReadProcedure(Type1Tokenizer tokenizer, bool hasReadStartProc)
         {
             var tokens = new List<Type1Token>();
-            var depth = -1;
+            var depth = hasReadStartProc ? 1 : -1;
             ReadProcedure(tokenizer, tokens, ref depth);
             return tokens;
         }
@@ -585,7 +604,7 @@
             return results;
         }
 
-        private static decimal ReadNumeric(Type1Tokenizer tokenizer)
+        private static double ReadNumeric(Type1Tokenizer tokenizer)
         {
             var token = tokenizer.GetNext();
 
@@ -594,7 +613,7 @@
                 throw new InvalidOperationException($"Expected to read a numeric token, instead got: {token}.");
             }
 
-            return token.AsDecimal();
+            return token.AsDouble();
         }
 
         private static bool ReadBoolean(Type1Tokenizer tokenizer)
@@ -663,13 +682,13 @@
                     throw new InvalidOperationException($"Found an unexpected token instead of subroutine charstring: {charstring}.");
                 }
 
-                if (!isLenientParsing && charstringToken.Data.Count != byteLength)
+                if (!isLenientParsing && charstringToken.Data.Length != byteLength)
                 {
                     throw new InvalidOperationException($"The subroutine charstring {charstringToken} did not have the expected length of {byteLength}.");
                 }
 
-                var subroutine = Decrypt(charstringToken.Data, CharstringEncryptionKey, lenIv);
-                subroutines.Add(new Type1CharstringDecryptedBytes(subroutine, index));
+                var subroutine = Decrypt(charstringToken.Data.Span, CharstringEncryptionKey, lenIv);
+                subroutines.Add(new Type1CharstringDecryptedBytes([.. subroutine], index));
                 ReadTillPut(tokenizer);
             }
 
@@ -714,14 +733,14 @@
                     throw new InvalidOperationException($"Got wrong type of token, expected charstring, instead got: {charstring}.");
                 }
 
-                if (!isLenientParsing && charstringToken.Data.Count != charstringLength)
+                if (!isLenientParsing && charstringToken.Data.Length != charstringLength)
                 {
                     throw new InvalidOperationException($"The charstring {charstringToken} did not have the expected length of {charstringLength}.");
                 }
 
-                var data = Decrypt(charstringToken.Data, CharstringEncryptionKey, lenIv);
+                var data = Decrypt(charstringToken.Data.Span, CharstringEncryptionKey, lenIv);
 
-                results.Add(new Type1CharstringDecryptedBytes(name, data, i));
+                results.Add(new Type1CharstringDecryptedBytes(name, [.. data], i));
 
                 ReadTillDef(tokenizer);
             }

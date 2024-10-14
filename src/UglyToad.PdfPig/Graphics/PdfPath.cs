@@ -1,7 +1,6 @@
 ﻿namespace UglyToad.PdfPig.Graphics
 {
     using System.Collections.Generic;
-    using System.Linq;
     using UglyToad.PdfPig.Core;
     using UglyToad.PdfPig.Graphics.Colors;
     using UglyToad.PdfPig.Graphics.Core;
@@ -30,7 +29,7 @@
         /// <summary>
         /// The fill color.
         /// </summary>
-        public IColor FillColor { get; internal set; }
+        public IColor? FillColor { get; internal set; }
 
         /// <summary>
         /// Returns true if the path is stroked.
@@ -40,12 +39,12 @@
         /// <summary>
         /// The stroke color.
         /// </summary>
-        public IColor StrokeColor { get; internal set; }
+        public IColor? StrokeColor { get; internal set; }
 
         /// <summary>
         /// Thickness in user space units of path to be stroked.
         /// </summary>
-        public decimal LineWidth { get; internal set; }
+        public double LineWidth { get; internal set; }
 
         /// <summary>
         /// The pattern to be used for stroked lines.
@@ -128,22 +127,7 @@
         /// <returns>For paths which don't define any geometry this returns <see langword="null"/>.</returns>
         public PdfRectangle? GetBoundingRectangle()
         {
-            if (this.Count == 0)
-            {
-                return null;
-            }
-
-            var bboxes = this.Select(x => x.GetBoundingRectangle()).Where(x => x.HasValue).Select(x => x.Value).ToList();
-            if (bboxes.Count == 0)
-            {
-                return null;
-            }
-
-            var minX = bboxes.Min(x => x.Left);
-            var minY = bboxes.Min(x => x.Bottom);
-            var maxX = bboxes.Max(x => x.Right);
-            var maxY = bboxes.Max(x => x.Top);
-            return new PdfRectangle(minX, minY, maxX, maxY);
+            return PdfSubpath.GetBoundingRectangle(this);
         }
     }
 }

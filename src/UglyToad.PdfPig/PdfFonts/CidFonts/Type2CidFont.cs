@@ -1,6 +1,9 @@
 ﻿namespace UglyToad.PdfPig.PdfFonts.CidFonts
 {
+    using System;
     using System.Collections.Generic;
+    using System.Diagnostics.CodeAnalysis;
+    using System.Linq;
     using Core;
     using Geometry;
     using Tokens;
@@ -10,9 +13,9 @@
     /// Type 2 CID fonts contains glyph descriptions based on
     /// the TrueType font format.
     /// </summary>
-    internal class Type2CidFont : ICidFont
+    internal sealed class Type2CidFont : ICidFont
     {
-        private readonly ICidFontProgram fontProgram;
+        private readonly ICidFontProgram? fontProgram;
         private readonly VerticalWritingMetrics verticalWritingMetrics;
         private readonly IReadOnlyDictionary<int, double> widths;
         private readonly double? defaultWidth;
@@ -33,10 +36,15 @@
         public FontDescriptor Descriptor { get; }
 
         public FontDetails Details => fontProgram?.Details ?? Descriptor?.ToDetails(BaseFont?.Data)
-                                      ?? FontDetails.GetDefault(BaseFont?.Data);
+            ?? FontDetails.GetDefault(BaseFont?.Data);
 
-        public Type2CidFont(NameToken type, NameToken subType, NameToken baseFont, CharacterIdentifierSystemInfo systemInfo,
-            FontDescriptor descriptor, ICidFontProgram fontProgram,
+        public Type2CidFont(
+            NameToken type,
+            NameToken subType,
+            NameToken baseFont,
+            CharacterIdentifierSystemInfo systemInfo,
+            FontDescriptor descriptor,
+            ICidFontProgram? fontProgram,
             VerticalWritingMetrics verticalWritingMetrics,
             IReadOnlyDictionary<int, double> widths,
             double? defaultWidth,
@@ -60,7 +68,7 @@
 
         public double GetWidthFromFont(int characterIdentifier)
         {
-            if (fontProgram == null)
+            if (fontProgram is null)
             {
                 return GetWidthFromDictionary(characterIdentifier);
             }
@@ -69,6 +77,7 @@
             {
                 return width;
             }
+
             // TODO: Read the font width from the font program.
             return GetWidthFromDictionary(characterIdentifier);
         }
@@ -85,12 +94,12 @@
                 return defaultWidth.Value;
             }
 
-            return (double)(Descriptor?.MissingWidth ?? 1000);
+            return Descriptor?.MissingWidth ?? 1000;
         }
 
         public PdfRectangle GetBoundingBox(int characterIdentifier)
         {
-            if (fontProgram == null)
+            if (fontProgram is null)
             {
                 return Descriptor.BoundingBox;
             }
@@ -113,6 +122,46 @@
         public PdfVector GetDisplacementVector(int characterIdentifier)
         {
             return verticalWritingMetrics.GetDisplacementVector(characterIdentifier);
+        }
+
+        public TransformationMatrix GetFontMatrix(int characterIdentifier)
+        {
+            return FontMatrix;
+        }
+
+        public bool TryGetPath(int characterCode, [NotNullWhen(true)] out IReadOnlyList<PdfSubpath>? path) => TryGetPath(characterCode, cidToGid.GetGlyphIndex, out path);
+
+        public bool TryGetPath(int characterCode, Func<int, int?> characterCodeToGlyphId, [NotNullWhen(true)] out IReadOnlyList<PdfSubpath>? path)
+        {
+            path = null;
+            if (fontProgram is null)
+            {
+                return false;
+            }
+
+            return fontProgram.TryGetPath(characterCode, characterCodeToGlyphId, out path);
+        }
+
+        public bool TryGetNormalisedPath(int characterCode, [NotNullWhen(true)] out IReadOnlyList<PdfSubpath>? path)
+        {
+            return TryGetNormalisedPath(characterCode, cidToGid.GetGlyphIndex, out path);
+        }
+
+        public bool TryGetNormalisedPath(int characterCode, Func<int, int?> characterCodeToGlyphId, [NotNullWhen(true)] out IReadOnlyList<PdfSubpath>? path)
+        {
+            path = null;
+            if (fontProgram is null)
+            {
+                return false;
+            }
+
+            if (fontProgram.TryGetPath(characterCode, characterCodeToGlyphId, out path))
+            {
+                path = GetFontMatrix(characterCode).Transform(path).ToArray();
+                return true;
+            }
+
+            return false;
         }
     }
 }

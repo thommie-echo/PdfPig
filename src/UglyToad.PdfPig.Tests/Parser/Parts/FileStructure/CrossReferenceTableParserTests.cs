@@ -1,12 +1,9 @@
 ﻿namespace UglyToad.PdfPig.Tests.Parser.Parts.FileStructure
 {
-    using System;
-    using System.Linq;
     using PdfPig.Core;
     using PdfPig.CrossReference;
     using PdfPig.Parser.FileStructure;
     using PdfPig.Tokenization.Scanner;
-    using Xunit;
 
     public class CrossReferenceTableParserTests
     {
@@ -25,7 +22,7 @@
 trailer
 << >>");
 
-            var result = CrossReferenceTableParser.Parse(input, 4, false);
+            var result = CrossReferenceTableParser.Parse(input.scanner, 4, false);
 
             Assert.Equal(4, result.ObjectOffsets.Count);
         }
@@ -286,9 +283,62 @@ trailer
             Assert.Equal(2, result.ObjectOffsets.Count);
         }
 
+        [Fact]
+        public void ParseEntriesAfterDeclaredCountIfLenient()
+        {
+            const string data = @"xref
+0 5
+0000000003 65535 f
+0000000090 00000 n
+0000000081 00000 n
+0000000223 00000 n
+0000000331 00000 n
+0000000127 00000 n
+0000000409 00000 f
+0000000418 00000 n
+
+trailer
+<< >>";
+            // Strict parsing
+            var input = GetReader(data);
+            var act = () => CrossReferenceTableParser.Parse(input, 0, false);
+            var ex = Assert.Throws<PdfDocumentFormatException>(act);
+            Assert.Equal("Found a line with 2 unexpected entries in the cross reference table: 127, 0.", ex.Message);
+
+            // Lenient Parsing
+            input = GetReader(data);
+            var result = CrossReferenceTableParser.Parse(input, 0, true);
+
+            Assert.Equal(6, result.ObjectOffsets.Count);
+        }
+
+        [Fact]
+        public void ParsesMissingWhitespaceAfterXref()
+        {
+            var data = @"xref15 2
+0000000190 00000 n
+0000000250 00032 n
+
+trailer
+<<>>";
+            var input = GetReader(data);
+
+            // Strict parsing
+            var act = () => CrossReferenceTableParser.Parse(input, 0, false);
+            
+            var ex = Assert.Throws<PdfDocumentFormatException>(act);
+            Assert.Equal("Unexpected operator in xref position: xref15.", ex.Message);
+
+            // Lenient Parsing
+            input = GetReader(data);
+            var result = CrossReferenceTableParser.Parse(input, 0, true);
+
+            Assert.Equal(2, result.ObjectOffsets.Count);
+        }
+
         private static CoreTokenScanner GetReader(string input)
         {
-            return StringBytesTestConverter.Scanner(input);
+            return StringBytesTestConverter.Scanner(input).scanner;
         }
     }
 }

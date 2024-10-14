@@ -1,7 +1,6 @@
 ﻿namespace UglyToad.PdfPig.Util
 {
     using System;
-    using System.Text;
 
     /**
      * Utility functions for hex encoding.
@@ -16,26 +15,38 @@
          * https://stackoverflow.com/questions/2817752/java-code-to-convert-byte-to-hexadecimal
          *
          */
-        private static readonly char[] HexChars = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
-        
-        /// <summary>
-        /// Returns a hex string for the given byte array.
-        /// </summary>
-        public static string GetString(byte[] bytes)
-        {
-            if (bytes == null)
-            {
-                throw new ArgumentNullException(nameof(bytes));
-            }
+        private static readonly char[] HexChars = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'];
 
-            var stringBuilder = new StringBuilder(bytes.Length * 2);
+        public static void GetUtf8Chars(ReadOnlySpan<byte> bytes, Span<byte> utf8Chars)
+        {
+            int position = 0;
 
             foreach (var b in bytes)
             {
-                stringBuilder.Append(HexChars[GetHighNibble(b)]).Append(HexChars[GetLowNibble(b)]);
+                utf8Chars[position++] = (byte)HexChars[GetHighNibble(b)];
+                utf8Chars[position++] = (byte)HexChars[GetLowNibble(b)];
+            }
+        }
+
+        /// <summary>
+        /// Returns a hex string for the given byte array.
+        /// </summary>
+        public static string GetString(ReadOnlySpan<byte> bytes)
+        {
+#if NET6_0_OR_GREATER
+            return Convert.ToHexString(bytes); 
+#else
+            var chars = new char[bytes.Length * 2];
+            int position = 0;
+
+            foreach (var b in bytes)
+            {
+                chars[position++] = HexChars[GetHighNibble(b)];
+                chars[position++] = HexChars[GetLowNibble(b)];
             }
 
-            return stringBuilder.ToString();
+            return new string(chars);
+#endif
         }
 
         private static int GetHighNibble(byte b)

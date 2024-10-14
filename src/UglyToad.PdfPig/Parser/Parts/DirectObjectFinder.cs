@@ -1,14 +1,22 @@
 ﻿namespace UglyToad.PdfPig.Parser.Parts
 {
+    using System.Diagnostics.CodeAnalysis;
     using Core;
     using Tokenization.Scanner;
     using Tokens;
 
-    internal static class DirectObjectFinder
+    /// <summary>
+    /// Direct object finder.
+    /// </summary>
+    public static class DirectObjectFinder
     {
-        public static bool TryGet<T>(IToken token, IPdfTokenScanner scanner, out T tokenResult) where T : IToken
+        /// <summary>
+        /// Try and get the token value, using the <see cref="IPdfTokenScanner"/> if it is a <see cref="IndirectReferenceToken"/>.
+        /// </summary>
+        public static bool TryGet<T>(IToken? token, IPdfTokenScanner scanner, [NotNullWhen(true)] out T? tokenResult) 
+            where T : class, IToken
         {
-            tokenResult = default(T);
+            tokenResult = null;
             if (token is T t)
             {
                 tokenResult = t;
@@ -23,6 +31,11 @@
             try
             {
                 var temp = scanner.Get(reference.Data);
+
+                if (temp is null)
+                {
+                    return false;
+                }
 
                 if (temp.Data is T tTemp)
                 {
@@ -43,7 +56,11 @@
             return false;
         }
 
-        public static T Get<T>(IndirectReference reference, IPdfTokenScanner scanner) where T : class, IToken
+        /// <summary>
+        /// Get the token value.
+        /// </summary>
+        public static T? Get<T>(IndirectReference reference, IPdfTokenScanner scanner) 
+            where T : class, IToken
         {
             var temp = scanner.Get(reference);
             if (temp is null || temp.Data is NullToken)
@@ -76,9 +93,13 @@
                 }
             }
 
-            throw new PdfDocumentFormatException($"Could not find the object number {reference} with type {typeof(T).Name}.");
+            throw new PdfDocumentFormatException($"Could not find the object number {reference} with type {typeof(T).Name} instead, it was found with type {temp.GetType().Name}.");
         }
 
+#nullable disable
+        /// <summary>
+        /// Get the token value, using the <see cref="IPdfTokenScanner"/> if it is a <see cref="IndirectReferenceToken"/>.
+        /// </summary>
         public static T Get<T>(IToken token, IPdfTokenScanner scanner) where T : class, IToken
         {
             if (token is T result)
@@ -91,7 +112,8 @@
                 return Get<T>(reference.Data, scanner);
             }
 
-            throw new PdfDocumentFormatException($"Could not find the object {token} with type {typeof(T).Name}.");
+            throw new PdfDocumentFormatException($"Could not find the object {token} with type {typeof(T).Name} instead, it was found with type {token.GetType().Name}.");
         }
+#nullable enable
     }
 }

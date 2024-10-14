@@ -1,6 +1,8 @@
 ﻿namespace UglyToad.PdfPig
 {
+    using System;
     using System.Collections.Generic;
+    using System.Diagnostics.CodeAnalysis;
     using Core;
     using Filters;
     using Parser.Parts;
@@ -15,9 +17,10 @@
         /// <summary>
         /// Try and get the entry with a given name and type or look-up the object if it's an indirect reference.
         /// </summary>
-        internal static bool TryGet<T>(this DictionaryToken dictionary, NameToken name, IPdfTokenScanner tokenScanner, out T token) where T : IToken
+        public static bool TryGet<T>(this DictionaryToken dictionary, NameToken name, IPdfTokenScanner tokenScanner, [NotNullWhen(true)] out T? token) 
+            where T : class, IToken
         {
-            token = default(T);
+            token = default;
             if (!dictionary.TryGet(name, out var t) || !(t is T typedToken))
             {
                 if (t is IndirectReferenceToken reference)
@@ -32,7 +35,10 @@
             return true;
         }
 
-        internal static T Get<T>(this DictionaryToken dictionary, NameToken name, IPdfTokenScanner scanner) where T : class, IToken
+        /// <summary>
+        /// Get the entry with a given name and type or look-up the object if it's an indirect reference.
+        /// </summary>
+        public static T Get<T>(this DictionaryToken dictionary, NameToken name, IPdfTokenScanner scanner) where T : class, IToken
         {
             if (!dictionary.TryGet(name, out var token) || !(token is T typedToken))
             {
@@ -46,31 +52,34 @@
 
             return typedToken;
         }
-        
+
         /// <summary>
         /// Get the decoded data from this stream.
         /// </summary>
-        public static IReadOnlyList<byte> Decode(this StreamToken stream, IFilterProvider filterProvider)
+        public static ReadOnlyMemory<byte> Decode(this StreamToken stream, IFilterProvider filterProvider)
         {
             var filters = filterProvider.GetFilters(stream.StreamDictionary);
 
             var transform = stream.Data;
             for (var i = 0; i < filters.Count; i++)
             {
-                transform = filters[i].Decode(transform, stream.StreamDictionary, i);
+                transform = filters[i].Decode(transform.Span, stream.StreamDictionary, i);
             }
 
             return transform;
         }
 
-        internal static IReadOnlyList<byte> Decode(this StreamToken stream, ILookupFilterProvider filterProvider, IPdfTokenScanner scanner)
+        /// <summary>
+        /// Get the decoded data from this stream.
+        /// </summary>
+        public static ReadOnlyMemory<byte> Decode(this StreamToken stream, ILookupFilterProvider filterProvider, IPdfTokenScanner scanner)
         {
             var filters = filterProvider.GetFilters(stream.StreamDictionary, scanner);
 
             var transform = stream.Data;
             for (var i = 0; i < filters.Count; i++)
             {
-                transform = filters[i].Decode(transform, stream.StreamDictionary, i);
+                transform = filters[i].Decode(transform.Span, stream.StreamDictionary, i);
             }
 
             return transform;

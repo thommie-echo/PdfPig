@@ -1,11 +1,8 @@
 ﻿namespace UglyToad.PdfPig.Tests.Fonts.Parser
 {
-    using System.Collections.Generic;
     using System.Diagnostics;
-    using System.IO;
     using PdfFonts.Parser;
     using PdfPig.Core;
-    using Xunit;
 
     public class CMapParserTests
     {
@@ -41,6 +38,20 @@ CMapName currentdict /CMap defineresource pop
 end
 end";
 
+        private const string CmapMissingDictionaryEndToken = @"
+/CIDInit /ProcSet findresource 
+begin 12 dict 
+begin begincmap 
+/CIDSystemInfo <<
+/Registry (F2+0) /Ordering (F2) /Supplement 0
+/CMapName /F2+0 def
+/CMapType 2 def
+1 begincodespacerange <020D> <020D>  endcodespacerange
+1 beginbfchar
+<020D> <03A9>
+endcmap CMapName currentdict /CMap defineresource pop end end
+endbfchar";
+
         private readonly CMapParser cMapParser = new CMapParser(); 
 
         [Fact]
@@ -59,13 +70,25 @@ end";
         }
 
         [Fact]
+        public void CanParseCidSystemInfoAndOtherInformationWhenMissingDictionaryClose()
+        {
+            var input = StringBytesTestConverter.Convert(CmapMissingDictionaryEndToken, false);
+
+            var cmap = cMapParser.Parse(input.Bytes);
+
+            Assert.Equal("F2+0", cmap.Info.Registry);
+            Assert.Equal("F2", cmap.Info.Ordering);
+            Assert.Equal(0, cmap.Info.Supplement);
+        }
+
+        [Fact]
         public void CanParseCodespaceRange()
         {
             var input = StringBytesTestConverter.Convert(GoogleDocToUnicodeCmap, false);
 
             var cmap = cMapParser.Parse(input.Bytes);
 
-            Assert.Equal(1, cmap.CodespaceRanges.Count);
+            Assert.Single(cmap.CodespaceRanges);
 
             Assert.Equal(0, cmap.CodespaceRanges[0].StartInt);
             Assert.Equal(65535, cmap.CodespaceRanges[0].EndInt);
@@ -95,7 +118,7 @@ end";
         {
             Debug.WriteLine("Parsing: " + resourceName);
             
-            var input = new ByteArrayInputBytes(ReadResourceBytes(resourceName));
+            var input = new MemoryInputBytes(ReadResourceBytes(resourceName));
 
             var cmap = cMapParser.Parse(input);
 
@@ -105,11 +128,11 @@ end";
         [Fact]
         public void CanParseIdentityHorizontalCMap()
         {
-            var input = new ByteArrayInputBytes(ReadResourceBytes("UglyToad.PdfPig.Resources.CMap.Identity-H"));
+            var input = new MemoryInputBytes(ReadResourceBytes("UglyToad.PdfPig.Resources.CMap.Identity-H"));
 
             var cmap = cMapParser.Parse(input);
 
-            Assert.Equal(1, cmap.CodespaceRanges.Count);
+            Assert.Single(cmap.CodespaceRanges);
 
             var range = cmap.CodespaceRanges[0];
 

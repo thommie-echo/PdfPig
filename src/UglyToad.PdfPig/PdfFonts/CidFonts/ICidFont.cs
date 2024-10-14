@@ -1,11 +1,14 @@
 ﻿namespace UglyToad.PdfPig.PdfFonts.CidFonts
 {
+    using System;
+    using System.Diagnostics.CodeAnalysis;
+    using System.Collections.Generic;
     using Core;
     using Geometry;
     using Tokens;
 
     /// <summary>
-    /// A CID font contains glyph descriptions accessed by 
+    /// A CID font contains glyph descriptions accessed by
     /// CID (character identifier) as character selectors.
     /// </summary>
     /// <remarks>
@@ -51,5 +54,37 @@
         PdfVector GetPositionVector(int characterIdentifier);
 
         PdfVector GetDisplacementVector(int characterIdentifier);
+
+        TransformationMatrix GetFontMatrix(int characterIdentifier);
+
+        /// <summary>
+        /// Returns the glyph path for the given character code.
+        /// </summary>
+        /// <param name="characterCode">Character code in a PDF. Not to be confused with unicode.</param>
+        /// <param name="path">The glyph path for the given character code.</param>
+        bool TryGetPath(int characterCode, [NotNullWhen(true)] out IReadOnlyList<PdfSubpath>? path);
+
+        /// <summary>
+        /// Returns the glyph path for the given character code.
+        /// </summary>
+        /// <param name="characterCode">Character code in a PDF. Not to be confused with unicode.</param>
+        /// <param name="characterCodeToGlyphId"></param>
+        /// <param name="path">The glyph path for the given character code.</param>
+        bool TryGetPath(int characterCode, Func<int, int?> characterCodeToGlyphId, [NotNullWhen(true)] out IReadOnlyList<PdfSubpath>? path);
+
+        /// <summary>
+        /// Returns the normalised glyph path for the given character code in a PDF.
+        /// </summary>
+        /// <param name="characterCode">Character code in a PDF. Not to be confused with unicode.</param>
+        /// <param name="path">The normalized glyph path for the given character code.</param>
+        bool TryGetNormalisedPath(int characterCode, [NotNullWhen(true)] out IReadOnlyList<PdfSubpath>? path);
+
+        /// <summary>
+        /// Returns the normalised glyph path for the given character code in a PDF.
+        /// </summary>
+        /// <param name="characterCode">Character code in a PDF. Not to be confused with unicode.</param>
+        /// <param name="characterCodeToGlyphId"></param>
+        /// <param name="path">The normalized glyph path for the given character code.</param>
+        bool TryGetNormalisedPath(int characterCode, Func<int, int?> characterCodeToGlyphId, [NotNullWhen(true)] out IReadOnlyList<PdfSubpath>? path);
     }
 }

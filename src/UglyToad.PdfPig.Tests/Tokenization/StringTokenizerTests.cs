@@ -3,11 +3,10 @@
     using PdfPig.Core;
     using PdfPig.Tokenization;
     using PdfPig.Tokens;
-    using Xunit;
 
     public class StringTokenizerTests
     {
-        private readonly StringTokenizer tokenizer = new StringTokenizer();
+        private readonly StringTokenizer tokenizer = new StringTokenizer(true);
 
         [Fact]
         public void NullInput_ReturnsFalse()
@@ -30,7 +29,7 @@
         [InlineData('^')]
         public void DoesNotStartWithOpenBracket_ReturnsFalse(char firstByte)
         {
-            var input = new ByteArrayInputBytes(new[] {(byte)firstByte});
+            var input = new MemoryInputBytes(new[] {(byte)firstByte});
 
             var result = tokenizer.TryTokenize((byte)firstByte, input, out var token);
 
@@ -263,7 +262,7 @@ are the same.)";
         [Fact]
         public void HandlesUtf16Strings()
         {
-            var input = new ByteArrayInputBytes(new byte[]
+            var input = new MemoryInputBytes(new byte[]
             {
                 0xFE, 0xFF, 0x00, 0x4D, 0x00, 0x69, 0x00,
                 0x63, 0x29
@@ -279,7 +278,7 @@ are the same.)";
         [Fact]
         public void HandlesUtf16BigEndianStrings()
         {
-            var input = new ByteArrayInputBytes(new byte[]
+            var input = new MemoryInputBytes(new byte[]
             {
                 0xFF, 0xFE, 0x4D, 0x00, 0x69, 0x00, 0x63,
                 0x00, 0x29

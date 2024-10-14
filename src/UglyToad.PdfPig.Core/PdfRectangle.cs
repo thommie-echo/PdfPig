@@ -4,14 +4,14 @@
     using System.Globalization;
 
     /// <summary>
-    /// A rectangle in a PDF file. 
+    /// A rectangle in a PDF file.
     /// </summary>
     /// <remarks>
     /// PDF coordinates are defined with the origin at the lower left (0, 0).
     /// The Y-axis extends vertically upwards and the X-axis horizontally to the right.
     /// Unless otherwise specified on a per-page basis, units in PDF space are equivalent to a typographic point (1/72 inch).
     /// </remarks>
-    public struct PdfRectangle
+    public readonly struct PdfRectangle
     {
         /// <summary>
         /// Top left point of the rectangle.
@@ -46,53 +46,23 @@
             }
         }
 
-        private double width;
         /// <summary>
         /// Width of the rectangle.
         /// <para>A positive number.</para>
         /// </summary>
-        public double Width
-        {
-            get
-            {
-                if (double.IsNaN(width))
-                {
-                    GetWidthHeight();
-                }
+        public double Width { get; }
 
-                return width;
-            }
-        }
-
-        private double height;
         /// <summary>
         /// Height of the rectangle.
         /// <para>A positive number.</para>
         /// </summary>
-        public double Height
-        {
-            get
-            {
-                if (double.IsNaN(height))
-                {
-                    GetWidthHeight();
-                }
-
-                return height;
-            }
-        }
+        public double Height { get; }
 
         /// <summary>
         /// Rotation angle of the rectangle. Counterclockwise, in degrees.
         /// <para>-180 ≤ θ ≤ 180</para>
         /// </summary>
-        public double Rotation
-        {
-            get
-            {
-                return GetT() * 180 / Math.PI;
-            }
-        }
+        public double Rotation => GetT() * 180 / Math.PI;
 
         /// <summary>
         /// Area of the rectangle.
@@ -161,8 +131,8 @@
             BottomLeft = bottomLeft;
             BottomRight = bottomRight;
 
-            width = double.NaN;
-            height = double.NaN;
+            Width = Math.Sqrt((BottomLeft.X - BottomRight.X) * (BottomLeft.X - BottomRight.X) + (BottomLeft.Y - BottomRight.Y) * (BottomLeft.Y - BottomRight.Y));
+            Height = Math.Sqrt((BottomLeft.X - TopLeft.X) * (BottomLeft.X - TopLeft.X) + (BottomLeft.Y - TopLeft.Y) * (BottomLeft.Y - TopLeft.Y));
         }
 
         /// <summary>
@@ -186,29 +156,9 @@
             {
                 return Math.Atan2(BottomRight.Y - BottomLeft.Y, BottomRight.X - BottomLeft.X);
             }
-            else
-            {
-                // handle the case where both bottom points are identical
-                return Math.Atan2(TopLeft.Y - BottomLeft.Y, TopLeft.X - BottomLeft.X) - Math.PI / 2;
-            }
-        }
 
-        private void GetWidthHeight()
-        {
-            var t = GetT();
-            var cos = Math.Cos(t);
-            var sin = Math.Sin(t);
-
-            var inverseRotation = new TransformationMatrix(
-                cos, -sin, 0,
-                sin, cos, 0,
-                0, 0, 1);
-
-            // Using Abs as a proxy for Euclidean distance in 1D 
-            // as it might happen that points have negative coordinates.
-            var bl = inverseRotation.Transform(BottomLeft);
-            width = Math.Abs(inverseRotation.Transform(BottomRight).X - bl.X);
-            height = Math.Abs(inverseRotation.Transform(TopLeft).Y - bl.Y);
+            // handle the case where both bottom points are identical
+            return Math.Atan2(TopLeft.Y - BottomLeft.Y, TopLeft.X - BottomLeft.X) - Math.PI / 2;
         }
 
         /// <inheritdoc />

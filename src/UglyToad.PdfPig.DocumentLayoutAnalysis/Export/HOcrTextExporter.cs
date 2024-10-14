@@ -13,14 +13,14 @@
     /// hOCR v1.2 (HTML) text exporter.
     /// <para>See http://kba.cloud/hocr-spec/1.2/ </para>
     /// </summary>
-    public class HOcrTextExporter : ITextExporter
+    public sealed class HOcrTextExporter : ITextExporter
     {
         private const string XmlHeader = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\"\n\t\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n";
         private const string Hocrjs = "<script src='https://unpkg.com/hocrjs'></script>\n";
 
         private readonly IPageSegmenter pageSegmenter;
         private readonly IWordExtractor wordExtractor;
-
+        private readonly Func<string, string> invalidCharacterHandler;
         private readonly double scale;
         private readonly string indentChar;
 
@@ -32,16 +32,60 @@
         private int paraCount;
         private int imageCount;
 
+        /// <inheritdoc/>
+        public InvalidCharStrategy InvalidCharStrategy { get; }
+
         /// <summary>
         /// hOCR v1.2 (HTML)
         /// <para>See http://kba.cloud/hocr-spec/1.2/ </para>
         /// </summary>
-        public HOcrTextExporter(IWordExtractor wordExtractor, IPageSegmenter pageSegmenter, double scale = 1.0, string indent = "\t")
+        /// <param name="wordExtractor">Extractor used to identify words in the document.</param>
+        /// <param name="pageSegmenter">Segmenter used to split page into blocks.</param>
+        /// <param name="scale">Scale multiplier to apply to output document, defaults to 1.</param>
+        /// <param name="indentChar">Character to use for indentation, defaults to tab.</param>
+        /// <param name="invalidCharacterHandler">How to handle invalid characters.</param>
+        public HOcrTextExporter(IWordExtractor wordExtractor, IPageSegmenter pageSegmenter,
+                                   double scale, string indentChar,
+                                   Func<string, string> invalidCharacterHandler)
+            : this(wordExtractor, pageSegmenter, scale, indentChar,
+                  InvalidCharStrategy.Custom, invalidCharacterHandler)
+        { }
+
+        /// <summary>
+        /// hOCR v1.2 (HTML)
+        /// <para>See http://kba.cloud/hocr-spec/1.2/ </para>
+        /// </summary>
+        /// <param name="wordExtractor">Extractor used to identify words in the document.</param>
+        /// <param name="pageSegmenter">Segmenter used to split page into blocks.</param>
+        /// <param name="scale">Scale multiplier to apply to output document, defaults to 1.</param>
+        /// <param name="indentChar">Character to use for indentation, defaults to tab.</param>
+        /// <param name="invalidCharacterStrategy">How to handle invalid characters.</param>
+        public HOcrTextExporter(IWordExtractor wordExtractor, IPageSegmenter pageSegmenter,
+                                   double scale = 1, string indentChar = "\t",
+                                   InvalidCharStrategy invalidCharacterStrategy = InvalidCharStrategy.DoNotCheck)
+             : this(wordExtractor, pageSegmenter, scale, indentChar,
+                  invalidCharacterStrategy, null)
+        { }
+
+        private HOcrTextExporter(IWordExtractor wordExtractor, IPageSegmenter pageSegmenter,
+                           double scale, string indentChar,
+                           InvalidCharStrategy invalidCharacterStrategy,
+                           Func<string, string> invalidCharacterHandler)
         {
             this.wordExtractor = wordExtractor;
             this.pageSegmenter = pageSegmenter;
             this.scale = scale;
-            indentChar = indent;
+            this.indentChar = indentChar ?? string.Empty;
+            InvalidCharStrategy = invalidCharacterStrategy;
+
+            if (invalidCharacterHandler is null)
+            {
+                this.invalidCharacterHandler = TextExporterHelper.GetXmlInvalidCharHandler(InvalidCharStrategy);
+            }
+            else
+            {
+                this.invalidCharacterHandler = invalidCharacterHandler;
+            }
         }
 
         /// <summary>
@@ -49,7 +93,7 @@
         /// </summary>
         /// <param name="document">The document.</param>
         /// <param name="includePaths">Draw PdfPaths present in the page.</param>
-        /// <param name="useHocrjs">Will add a reference to the 'hocrjs' script just before the closing 'body' tag, adding the 
+        /// <param name="useHocrjs">Will add a reference to the 'hocrjs' script just before the closing 'body' tag, adding the
         /// interface to a plain hOCR file.<para>See https://github.com/kba/hocrjs for more information.</para></param>
         public string Get(PdfDocument document, bool includePaths = false, bool useHocrjs = false)
         {
@@ -61,10 +105,13 @@
                 hocr += GetCode(page, includePaths) + "\n";
             }
 
-            if (useHocrjs) hocr += indentChar + indentChar + Hocrjs;
+            if (useHocrjs)
+            {
+                hocr += indentChar + indentChar + Hocrjs;
+            }
+
             hocr += indentChar + "</body>";
-            hocr = XmlHeader + AddHtmlHeader(hocr);
-            return hocr;
+            return XmlHeader + AddHtmlHeader(hocr);
         }
 
         /// <summary>
@@ -80,8 +127,8 @@
         /// Get the hOCR (HTML) string of the page layout.
         /// </summary>
         /// <param name="page">The page.</param>
-        /// <param name="imageName">The image name, if any.</param>
         /// <param name="includePaths">Draw PdfPaths present in the page.</param>
+        /// <param name="imageName">The image name, if any.</param>
         /// <param name="useHocrjs">Will add a reference to the 'hocrjs' script just before the closing 'body' tag, adding the interface to a plain hOCR file.<para>See https://github.com/kba/hocrjs for more information.</para></param>
         public string Get(Page page, bool includePaths = false, string imageName = "unknown", bool useHocrjs = false)
         {
@@ -89,10 +136,13 @@
 
             hocr += GetCode(page, includePaths, imageName) + "\n";
 
-            if (useHocrjs) hocr += indentChar + indentChar + Hocrjs;
+            if (useHocrjs)
+            {
+                hocr += indentChar + indentChar + Hocrjs;
+            }
+
             hocr += indentChar + "</body>";
-            hocr = XmlHeader + AddHtmlHeader(hocr);
-            return hocr;
+            return XmlHeader + AddHtmlHeader(hocr);
         }
 
         private string GetHead()
@@ -129,14 +179,14 @@
         /// <para>http://kba.cloud/hocr-spec/1.2/#elementdef-ocr_page</para>
         /// </summary>
         /// <param name="page"></param>
-        /// <param name="imageName"></param>
         /// <param name="includePaths">Draw PdfPaths present in the page.</param>
+        /// <param name="imageName"></param>
         private string GetCode(Page page, bool includePaths, string imageName = "unknown")
         {
             pageCount++;
             int level = 2;
 
-            string hocr = GetIndent(level) + @"<div class='ocr_page' id='page_" + page.Number.ToString() +
+            string hocr = GetIndent(level) + "<div class='ocr_page' id='page_" + page.Number.ToString() +
                 "' title='image \"" + imageName + "\"; bbox 0 0 " +
                 (int)Math.Round(page.Width * scale) + " " + (int)Math.Round(page.Height * scale) +
                 "; ppageno " + (page.Number - 1) + "\'>";
@@ -156,16 +206,15 @@
 
             var words = page.GetWords(wordExtractor);
 
-            if (words.Count() > 0)
+            if (words.Any())
             {
-                var blocks = pageSegmenter.GetBlocks(words);
-                foreach (var block in blocks)
+                foreach (var block in pageSegmenter.GetBlocks(words))
                 {
                     hocr += "\n" + GetCodeArea(block, page.Height, level + 1);
                 }
             }
 
-            hocr += "\n" + GetIndent(level) + @"</div>";
+            hocr += "\n" + GetIndent(level) + "</div>";
             return hocr;
         }
 
@@ -179,7 +228,10 @@
         /// <param name="level">The indent level.</param>
         private string GetCode(PdfPath path, double pageHeight, bool subPaths, int level)
         {
-            if (path == null) return string.Empty;
+            if (path == null)
+            {
+                return string.Empty;
+            }
 
             string hocr = string.Empty;
 
@@ -189,7 +241,7 @@
                 if (bbox.HasValue)
                 {
                     areaCount++;
-                    hocr += GetIndent(level) + @"<div class='ocr_carea' id='block_" + pageCount + "_"
+                    hocr += GetIndent(level) + "<div class='ocr_carea' id='block_" + pageCount + "_"
                         + areaCount + "' title='" + GetCode(bbox.Value, pageHeight) + "'>\n";
                     foreach (var subPath in path)
                     {
@@ -197,11 +249,11 @@
                         if (subBbox.HasValue)
                         {
                             pathCount++;
-                            hocr += GetIndent(level + 1) + @"<span class='ocr_linedrawing' id='drawing_" + pageCount + "_"
+                            hocr += GetIndent(level + 1) + "<span class='ocr_linedrawing' id='drawing_" + pageCount + "_"
                                 + pathCount + "' title='" + GetCode(subBbox.Value, pageHeight) + "' />\n";
                         }
                     }
-                    hocr += GetIndent(level) + @"</div>";
+                    hocr += GetIndent(level) + "</div>";
                 }
             }
             else
@@ -210,7 +262,7 @@
                 if (bbox.HasValue)
                 {
                     pathCount++;
-                    hocr += GetIndent(level) + @"<span class='ocr_linedrawing' id='drawing_" + pageCount + "_"
+                    hocr += GetIndent(level) + "<span class='ocr_linedrawing' id='drawing_" + pageCount + "_"
                             + pathCount + "' title='" + GetCode(bbox.Value, pageHeight) + "' />";
                 }
             }
@@ -222,7 +274,7 @@
         {
             imageCount++;
             var bbox = pdfImage.Bounds;
-            return GetIndent(level) + @"<span class='ocr_image' id='image_" + pageCount + "_"
+            return GetIndent(level) + "<span class='ocr_image' id='image_" + pageCount + "_"
                             + imageCount + "' title='" + GetCode(bbox, pageHeight) + "' />";
         }
 
@@ -237,12 +289,11 @@
         {
             areaCount++;
 
-            string bbox = GetCode(block.BoundingBox, pageHeight);
-            string hocr = GetIndent(level) + @"<div class='ocr_carea' id='block_" + pageCount + "_"
+            string hocr = GetIndent(level) + "<div class='ocr_carea' id='block_" + pageCount + "_"
                 + areaCount + "' title='" + GetCode(block.BoundingBox, pageHeight) + "'>";
 
             hocr += GetCodeParagraph(block, pageHeight, level + 1); // we concider 1 area = 1 block. should change in the future
-            hocr += "\n" + GetIndent(level) + @"</div>";
+            hocr += "\n" + GetIndent(level) + "</div>";
             return hocr;
         }
 
@@ -256,14 +307,14 @@
         private string GetCodeParagraph(TextBlock block, double pageHeight, int level)
         {
             paraCount++;
-            string hocr = "\n" + GetIndent(level) + @"<p class='ocr_par' id='par_" + pageCount + "_"
+            string hocr = "\n" + GetIndent(level) + "<p class='ocr_par' id='par_" + pageCount + "_"
                 + paraCount + "' title='" + GetCode(block.BoundingBox, pageHeight) + "'>"; // lang='eng'
 
             foreach (var line in block.TextLines)
             {
                 hocr += "\n" + GetCode(line, pageHeight, level + 1);
             }
-            hocr += "\n" + GetIndent(level) + @"</p>";
+            hocr += "\n" + GetIndent(level) + "</p>";
 
             return hocr;
         }
@@ -282,17 +333,17 @@
 
             // http://kba.cloud/hocr-spec/1.2/#propdef-baseline
             // below will be 0 as long as the word's bounding box bottom is the BaseLine and not 'Bottom'
-            double baseLine = (double)line.Words[0].Letters[0].StartBaseLine.Y;
-            baseLine = (double)line.BoundingBox.Bottom - baseLine;
+            double baseLine = line.Words[0].Letters[0].StartBaseLine.Y;
+            baseLine = line.BoundingBox.Bottom - baseLine;
 
-            string hocr = GetIndent(level) + @"<span class='ocr_line' id='line_" + pageCount + "_" + lineCount + "' title='" +
+            string hocr = GetIndent(level) + "<span class='ocr_line' id='line_" + pageCount + "_" + lineCount + "' title='" +
                 GetCode(line.BoundingBox, pageHeight) + "; baseline " + angle + " 0'>"; //"; x_size 42; x_descenders 5; x_ascenders 12' >";
 
             foreach (var word in line.Words)
             {
                 hocr += "\n" + GetCode(word, pageHeight, level + 1);
             }
-            hocr += "\n" + GetIndent(level) + @"</span>";
+            hocr += "\n" + GetIndent(level) + "</span>";
             return hocr;
         }
 
@@ -307,7 +358,7 @@
         {
             wordCount++;
             string hocr = GetIndent(level) +
-                @"<span class='ocrx_word' id='word_" + pageCount + "_" + wordCount +
+                "<span class='ocrx_word' id='word_" + pageCount + "_" + wordCount +
                 "' title='" + GetCode(word.BoundingBox, pageHeight) + "; x_wconf " + GetConfidence(word);
 
             hocr += "; x_font " + word.FontName;
@@ -318,7 +369,7 @@
             }
             hocr += "'";
 
-            hocr += ">" + word.Text + "</span> ";
+            hocr += ">" + invalidCharacterHandler(word.Text) + "</span> ";
             return hocr;
         }
 
@@ -343,7 +394,7 @@
             var right = (int)Math.Round(rectangle.Right * scale);
             var bottom = (int)Math.Round((pageHeight - rectangle.Bottom) * scale);
 
-            return @"bbox " + (left > 0 ? left : 0) + " "
+            return "bbox " + (left > 0 ? left : 0) + " "
                             + (top > 0 ? top : 0) + " "
                             + (right > 0 ? right : 0) + " "
                             + (bottom > 0 ? bottom : 0);
