@@ -131,6 +131,9 @@
     <None Update="Dla\Documents\Random 2 Columns Lists Hyph - Justified.pdf">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="Schiphol HY.pdf">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <ItemGroup>
